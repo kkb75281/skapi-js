@@ -12,7 +12,9 @@ import {
     Form,
     PostRecordConfig,
     PublicUser,
-    UserProfilePublicSettings
+    UserProfilePublicSettings,
+    FileInfo,
+    DelRecordQuery
 } from '../Types';
 import {
     CognitoUserPool
@@ -39,7 +41,8 @@ import {
     postRealtime,
     closeRealtime,
     getRealtimeUsers,
-    getRealtimeGroups
+    getRealtimeGroups,
+    connectRTC
 } from '../methods/realtime';
 import {
     secureRequest,
@@ -88,6 +91,7 @@ import {
     registerTicket,
     unregisterTicket,
     jwtLogin,
+    _out,
 } from '../methods/user';
 import {
     extractFormData,
@@ -102,11 +106,14 @@ import {
     deleteAccount,
     inviteUser,
     createAccount,
-    grantAccess
+    grantAccess,
+    getInvitations,
+    cancelInvitation,
+    resendInvitation
 } from '../methods/admin';
 export default class Skapi {
     // current version
-    private __version = '1.0.157';
+    private __version = '1.0.185';
     service: string;
     owner: string;
     session: Record<string, any> | null = null;
@@ -114,7 +121,6 @@ export default class Skapi {
     userPool: CognitoUserPool | null = null;
 
     private host = 'skapi';
-
     private hostDomain = 'skapi.com';
     private target_cdn = 'd3e9syvbtso631';
 
@@ -159,7 +165,26 @@ export default class Skapi {
         // setting user is bypassed
     }
 
-    loginHandle: Function = (user: UserProfile): void => { };
+    private _onLoginListeners: Function[] = [];
+
+    get onLogin(): Function[] {
+        return this._onLoginListeners;
+    }
+
+    set onLogin(listener: (user: UserProfile) => void) {
+        // setting onLogin is bypassed
+        if (typeof listener === 'function') {
+            this._onLoginListeners.push(listener);
+        }
+    }
+
+    private _runOnLoginListeners(user: UserProfile) {
+        for (let listener of this._onLoginListeners) {
+            if (typeof listener === 'function') {
+                listener(user);
+            }
+        }
+    }
 
     admin_endpoint: Promise<Record<string, any>>;
     record_endpoint: Promise<Record<string, any>>;
@@ -232,18 +257,43 @@ export default class Skapi {
     private __socket: WebSocket;
     private __socket_room: string;
     private __network_logs = false;
+    private __sdpoffer: RTCSessionDescriptionInit;
+    private peerConnection: RTCPeerConnection;
 
-    constructor(service: string, owner: string, options?: { autoLogin: boolean; }, __etc?: any) {
+    constructor(service: string, owner: string, options?: {
+        autoLogin: boolean;
+        eventListener?: {
+            onLogin: (user: UserProfile) => void;
+        }
+    }, __etc?: any) {
+        if(!window) {
+            throw new SkapiError('This library is for browser only.', { code: 'NOT_SUPPORTED' });
+        }
+        window.sessionStorage.setItem('__skapi_kiss', 'kiss');
+        if (window.sessionStorage.getItem('__skapi_kiss') !== 'kiss') {
+            window.alert('Session storage is disabled. Please enable session storage.');
+            throw new SkapiError('Session storage is disabled. Please enable session storage.', { code: 'SESSION_STORAGE_DISABLED' });
+        }
+
+        window.sessionStorage.removeItem('__skapi_kiss');
+
         if (typeof service !== 'string' || typeof owner !== 'string') {
+            window.alert("Service ID or Owner ID is invalid.");
             throw new SkapiError('"service" and "owner" should be type <string>.', { code: 'INVALID_PARAMETER' });
         }
 
         if (!service || !owner) {
+            window.alert("Service ID or Owner ID is invalid.");
             throw new SkapiError('"service" and "owner" is required', { code: 'INVALID_PARAMETER' });
         }
 
         if (owner !== this.host) {
-            validator.UserId(owner, '"owner"');
+            try {
+                validator.UserId(owner, '"owner"');
+            } catch (err: any) {
+                window.alert("Service ID or Owner ID is invalid.");
+                throw err;
+            }
         }
 
         this.service = service;
@@ -255,6 +305,10 @@ export default class Skapi {
             if (typeof options.autoLogin === 'boolean') {
                 autoLogin = options.autoLogin;
             }
+        }
+
+        if (options?.eventListener?.onLogin) {
+            this.onLogin = options.eventListener.onLogin;
         }
 
         // get endpoints
@@ -274,7 +328,14 @@ export default class Skapi {
                 reader.onerror = reject;
                 reader.readAsDataURL(blob);
             }))
-            .then(data => typeof data === 'string' ? JSON.parse(window.atob(data.split(',')[1])) : null);
+            .then(data => {
+                try {
+                    return typeof data === 'string' ? JSON.parse(window.atob(data.split(',')[1])) : null
+                }
+                catch (err) {
+                    throw new SkapiError('Service does not exist. Create your service from skapi.com', { code: 'NOT_EXISTS' });
+                }
+            });
 
         this.record_endpoint = fetch(`${cdn_domain}/${sreg}/record.json`)
             .then(response => response.blob())
@@ -284,10 +345,18 @@ export default class Skapi {
                 reader.onerror = reject;
                 reader.readAsDataURL(blob);
             }))
-            .then(data => typeof data === 'string' ? JSON.parse(window.atob(data.split(',')[1])) : null);
+            .then(data => {
+                try {
+                    return typeof data === 'string' ? JSON.parse(window.atob(data.split(',')[1])) : null
+                }
+                catch (err) {
+                    throw new SkapiError('Service does not exist. Create your service from skapi.com', { code: 'NOT_EXISTS' });
+                }
+            });
 
         if (!window.sessionStorage) {
-            throw new Error(`This browser does not support skapi.`);
+            window.alert('This browser is not supported.');
+            throw new Error(`This browser is not supported.`);
         }
 
         const restore = JSON.parse(window.sessionStorage.getItem(`${service}#${owner}`) || 'null');
@@ -301,20 +370,32 @@ export default class Skapi {
             }
         }
 
-        this.__authConnection = (async () => {
+        this.__authConnection = (async (): Promise<void> => {
             const admin_endpoint = await this.admin_endpoint;
             this.userPool = new CognitoUserPool({
                 UserPoolId: admin_endpoint.userpool_id,
                 ClientId: admin_endpoint.userpool_client
             });
 
-            if (restore?.connection || autoLogin) {
-                try {
-                    await authentication.bind(this)().getSession({ refreshToken: !restore?.connection });
+            try {
+                let fireWhenAutoLogin = await authentication.bind(this)().getSession({
+                    _holdLogin: true
+                });
+
+                let cognitoUser = this.userPool.getCurrentUser();
+                if (cognitoUser) {
+                    if (!restore?.connection && !autoLogin) {
+                        _out.bind(this)();
+                    }
+                    else {
+                        (fireWhenAutoLogin as Function)();
+                    }
                 }
-                catch (err) {
-                    await logout.bind(this)();
+                else {
+                    // _out.bind(this)();
                 }
+            } catch (err) {
+                // _out.bind(this)();
             }
         })()
 
@@ -324,7 +405,7 @@ export default class Skapi {
 
             if (!restore?.connection) {
                 // await for first connection
-                connection = this.updateConnection();
+                connection = this._updateConnection();
             }
 
             const storeClassProperties = () => {
@@ -378,7 +459,26 @@ export default class Skapi {
         });
     }
 
-    async updateConnection(): Promise<Connection> {
+    async getConnectionInfo(): Promise<{
+        user_ip: string;
+        user_agent: string;
+        user_location: string;
+        service_name: string;
+        version: string;
+    }> {
+        let conn = await this.__connection;
+        // get browser user-agent info
+        let ua = conn?.user_agent || navigator.userAgent;
+        return {
+            user_ip: conn.ip,
+            user_agent: ua,
+            user_location: conn.locale,
+            service_name: conn.service_name,
+            version: this.__version
+        };
+    }
+
+    private async _updateConnection(): Promise<Connection> {
         try {
             this.connection = await request.bind(this)('service', {
                 service: this.service,
@@ -386,9 +486,8 @@ export default class Skapi {
             }, { bypassAwaitConnection: true, method: 'get' });
         }
         catch (err: any) {
-            if (window) {
-                window.alert('Service is not available: ' + (err.message || err.toString()));
-            }
+            this.log('Connection fail', err);
+            window.alert('Service is not available: ' + (err.message || err.toString()));
 
             this.connection = null;
             throw err;
@@ -420,8 +519,23 @@ export default class Skapi {
         }
     }
 
+    @formHandler()
+    connectRTC(
+        params: {
+            recipient: string;
+            ice?: string;
+            callback?: {
+                onicecandidate?: (e:any)=>void;
+                onnegotiationneeded?: (e:any)=>void;
+                onerror?: (e:any)=>void;
+            }
+        }
+    ): Promise<any> {
+        return connectRTC.bind(this)(params);
+    }
+
     connectRealtime(cb: (rt: {
-        type: 'message' | 'error' | 'success' | 'close' | 'notice' | 'private';
+        type: 'message' | 'error' | 'success' | 'close' | 'notice' | 'private' | 'sdpOffer' | 'sdpBroadcast';
         message: any;
         sender?: string; // user_id of the sender
         sender_cid?: string; // connection id of the sender
@@ -437,6 +551,27 @@ export default class Skapi {
         nonce?: string;
     }): Promise<UserProfile> {
         return jwtLogin.bind(this)(params);
+    }
+
+    @formHandler()
+    resendInvitation(params: Form<{
+        email: string;
+    }>): Promise<"SUCCESS: Invitation has been re-sent. (User ID: xxx...)"> {
+        return resendInvitation.bind(this)(params);
+    }
+
+    @formHandler()
+    cancelInvitation(params: Form<{
+        email: string;
+    }>): Promise<"SUCCESS: Invitation has been canceled."> {
+        return cancelInvitation.bind(this)(params);
+    }
+
+    @formHandler()
+    getInvitations(params: Form<{
+        email?: string;
+    }>, fetchOptions: FetchOptions): Promise<DatabaseResponse<UserProfile>> {
+        return getInvitations.bind(this)(params, fetchOptions);
     }
 
     @formHandler()
@@ -514,11 +649,8 @@ export default class Skapi {
     @formHandler()
     createAccount(
         form: UserAttributes & UserProfilePublicSettings & { email: string; password: string; },
-        options: {
-            email_subscription?: boolean;
-        }
     ): Promise<UserProfile & PublicUser & { email_admin: string; approved: string; log: number; username: string; }> {
-        return createAccount.bind(this)(form, options);
+        return createAccount.bind(this)(form);
     }
 
     @formHandler()
@@ -568,11 +700,11 @@ export default class Skapi {
     getFile(
         url: string, // cdn endpoint url https://xxxx.cloudfront.net/path/file
         config?: {
-            dataType?: 'base64' | 'download' | 'endpoint' | 'blob' | 'text'; // default 'download'
+            dataType?: 'base64' | 'download' | 'endpoint' | 'blob' | 'text' | 'info'; // default 'download'
             expires?: number; // uses url that expires. this option does not use the cdn (slow). can be used for private files. (does not work on public files).
             progress?: ProgressCallback;
         }
-    ): Promise<Blob | string | void> {
+    ): Promise<Blob | string | void | FileInfo> {
         return getFile.bind(this)(url, config);
     }
     @formHandler()
@@ -656,18 +788,7 @@ export default class Skapi {
         number_of_records: string; // Number records tagged
     }>> { return getTags.bind(this)(query, fetchOptions); }
     @formHandler()
-    deleteRecords(params: {
-        /** Record ID(s) to delete. Table parameter is not needed when record_id is given. */
-        record_id?: string | string[];
-        table?: {/**
-            /** Table name. */
-            name: string;
-            /** Access group number. */
-            access_group?: number | 'private' | 'public' | 'authorized';
-            // subscription_group?: number;
-            subscription: boolean;
-        };
-    }): Promise<string> { return deleteRecords.bind(this)(params); }
+    deleteRecords(params: DelRecordQuery & { private_key?: string; }): Promise<string> { return deleteRecords.bind(this)(params); }
     @formHandler()
     resendSignupConfirmation(
         /** Redirect url on confirmation success. */
@@ -771,8 +892,8 @@ export default class Skapi {
         user_id: string | string[];
     }): Promise<DatabaseResponse<{ record_id: string; user_id: string; }>> { return listPrivateRecordAccess.bind(this)(params); }
     @formHandler()
-    requestPrivateRecordAccessKey(record_id: string): Promise<string> {
-        return requestPrivateRecordAccessKey.bind(this)(record_id);
+    requestPrivateRecordAccessKey(params: { record_id: string | string[] }): Promise<{ [record_id: string]: string }> {
+        return requestPrivateRecordAccessKey.bind(this)(params);
     }
     @formHandler()
     deleteFiles(params: {
@@ -794,11 +915,10 @@ export default class Skapi {
         options?: {
             auth?: boolean;
             method?: string;
-            bypassAwaitConnection?: boolean;
             responseType?: 'blob' | 'json' | 'text' | 'arrayBuffer' | 'formData' | 'document';
             contentType?: string;
             progress?: ProgressCallback;
-        }): Promise<{ mockResponse: Record<string, any>; }> { return mock.bind(this)(data, options); }
+        }): Promise<{ [key: string]: any }> { return mock.bind(this)(data, options); }
     @formHandler({ preventMultipleCalls: true })
     login(
         form: Form<{
@@ -883,8 +1003,6 @@ export default class Skapi {
             subscriber?: string;
             /** User ID of the subscription. User id that subscriber has subscribed to. */
             subscription?: string;
-            // /** subscription group. if omitted, will fetch all groups. */
-            // group?: number;
             /** Fetch blocked subscription when True */
             blocked?: boolean;
         },

@@ -1,10 +1,11 @@
 import validator from '../utils/validator';
 import { request } from '../utils/network';
 import { checkAdmin } from './user';
-import { Form, UserAttributes, UserProfilePublicSettings, UserProfile, PublicUser } from '../Types';
+import { Form, UserAttributes, UserProfilePublicSettings, UserProfile, PublicUser, DatabaseResponse, FetchOptions } from '../Types';
 import SkapiError from '../main/error';
+import { parseUserAttributes } from '../utils/utils';
 
-export async function blockAccount (form: Form<{
+export async function blockAccount(form: Form<{
     user_id: string;
     owner?: string;
     service?: string;
@@ -36,7 +37,7 @@ export async function blockAccount (form: Form<{
     return await request.bind(this)('block-account', params, { auth: true });
 }
 
-export async function unblockAccount (form: Form<{
+export async function unblockAccount(form: Form<{
     user_id: string;
     owner?: string;
     service?: string;
@@ -68,7 +69,7 @@ export async function unblockAccount (form: Form<{
     return await request.bind(this)('block-account', params, { auth: true });
 }
 
-export async function deleteAccount (form: Form<{
+export async function deleteAccount(form: Form<{
     user_id: string;
     owner?: string;
     service?: string;
@@ -100,8 +101,8 @@ export async function deleteAccount (form: Form<{
     return await request.bind(this)('remove-account', params, { auth: true });
 }
 
-export async function inviteUser (
-    form: Form<UserAttributes & UserProfilePublicSettings & { email: string; owner?: string; service?: string;}>, 
+export async function inviteUser(
+    form: Form<UserAttributes & UserProfilePublicSettings & { email: string; owner?: string; service?: string; }>,
     options?: {
         confirmation_url?: string; // url 없으면 무조건 true
         email_subscription?: boolean;
@@ -110,21 +111,21 @@ export async function inviteUser (
     let paramRestrictions = {
         email: (v: string) => validator.Email(v),
         password: (v: string) => validator.Password(v),
-        
+
         name: 'string',
         username: 'string',
         gender: 'string',
         address: (v: any) => {
             if (!v) return '';
-            
+
             if (typeof v === 'string') {
                 return v;
             }
-            
+
             if (typeof v === 'object') {
                 return JSON.stringify(v);
             }
-            
+
             return undefined;
         },
         birthdate: (v: string) => validator.Birthdate(v),
@@ -140,6 +141,21 @@ export async function inviteUser (
         address_public: ['boolean', () => false],
         birthdate_public: ['boolean', () => false],
         phone_number_public: ['boolean', () => false],
+        access_group: (v: number) => {
+            // if string try to convert to number and if it's not a number, throw error
+            try {
+                if (typeof v === 'string') {
+                    v = v === 'admin' ? 99 : parseInt(v);
+                }
+            }
+            catch (e) {
+                throw new SkapiError('"access_group" is invalid. Should be type <number>.', { code: 'INVALID_PARAMETER' });
+            }
+            if (typeof v !== 'number' || v < 1 || v > 100) {
+                throw new SkapiError('"access_group" is invalid. Should be type <number> of range 1~99', { code: 'INVALID_PARAMETER' });
+            }
+            return v;
+        }
     };
 
     let params = validator.Params(form, paramRestrictions, ['email']);
@@ -188,44 +204,41 @@ export async function inviteUser (
         }
     }
 
-    return await request.bind(this)('admin-signup', Object.assign({access_group: 1}, params), { auth: true });
+    return await request.bind(this)('admin-signup', params, { auth: true });
 }
 
-export async function createAccount (
+export async function createAccount(
     form: Form<
-        UserAttributes & UserProfilePublicSettings & 
-        { email: string; password: string; } & 
+        UserAttributes & UserProfilePublicSettings &
+        { email: string; password: string; } &
         { service?: string; owner?: string; }
     >,
-    options?: {
-        email_subscription?: boolean;
-    }
 ): Promise<UserProfile & PublicUser & { email_admin: string; approved: string; log: number; username: string; }> {
     let paramRestrictions = {
         email: (v: string) => validator.Email(v),
         password: (v: string) => validator.Password(v),
-        
+
         name: 'string',
         username: 'string',
         gender: 'string',
         address: (v: any) => {
             if (!v) return '';
-            
+
             if (typeof v === 'string') {
                 return v;
             }
-            
+
             if (typeof v === 'object') {
                 return JSON.stringify(v);
             }
-            
+
             return undefined;
         },
         birthdate: (v: string) => validator.Birthdate(v),
         phone_number: (v: string) => validator.PhoneNumber(v),
-        picture: (v: string) => { if (v) return validator.Url(v); else return undefined },
-        profile: (v: string) => { if (v) return validator.Url(v); else return undefined },
-        website: (v: string) => { if (v) return validator.Url(v); else return undefined },
+        picture: (v: string) => { if (v) return validator.Url(v); else return "" },
+        profile: (v: string) => { if (v) return validator.Url(v); else return "" },
+        website: (v: string) => { if (v) return validator.Url(v); else return "" },
         nickname: 'string',
         misc: 'string',
 
@@ -234,20 +247,24 @@ export async function createAccount (
         address_public: ['boolean', () => false],
         birthdate_public: ['boolean', () => false],
         phone_number_public: ['boolean', () => false],
-    };
-
-    let params = validator.Params(form, paramRestrictions, ['email', 'password']);
-
-    options = validator.Params(options, {
-        email_subscription: (v: boolean) => {
-            if (typeof v !== 'boolean') {
-                throw new SkapiError('"options.email_subscription" should be type: <boolean>.', { code: 'INVALID_PARAMETER' });
+        access_group: (v: number) => {
+            // if string try to convert to number and if it's not a number, throw error
+            try {
+                if (typeof v === 'string') {
+                    v = parseInt(v);
+                }
+            }
+            catch (e) {
+                throw new SkapiError('"access_group" is invalid. Should be type <number>.', { code: 'INVALID_PARAMETER' });
+            }
+            if (typeof v !== 'number' || v < 1 || v > 100) {
+                throw new SkapiError('"access_group" is invalid. Should be type <number> of range 1~99', { code: 'INVALID_PARAMETER' });
             }
             return v;
         },
-    });
+    };
 
-    params.email_subscription = options?.email_subscription || false;
+    let params = validator.Params(form, paramRestrictions, ['email', 'password']);
 
     let isAdmin = await checkAdmin.bind(this)();
 
@@ -261,10 +278,10 @@ export async function createAccount (
         }
     }
 
-    return await request.bind(this)('admin-signup', Object.assign({access_group: 1}, params), { auth: true });
+    return await request.bind(this)('admin-signup', params, { auth: true });
 }
 
-export async function grantAccess (params: Form<{
+export async function grantAccess(params: Form<{
     user_id: string;
     access_group: number;
     service?: string;
@@ -275,10 +292,19 @@ export async function grantAccess (params: Form<{
             return validator.UserId(v, '"user_id"');
         },
         access_group: (v: number) => {
-            if (v > 0 && v < 100) {
+            // if string try to convert to number and if it's not a number, throw error
+            try {
+                if (typeof v === 'string') {
+                    v = parseInt(v);
+                }
+            }
+            catch (e) {
+                throw new SkapiError('"access_group" is invalid. Should be type <number>.', { code: 'INVALID_PARAMETER' });
+            }
+            if (typeof v === 'number' && v > 0 && v < 100) {
                 return v;
             } else {
-                throw new SkapiError('"access_group" is invalid.', { code: 'INVALID_PARAMETER' });
+                throw new SkapiError('"access_group" is invalid. Should be type <number> of range 1~99', { code: 'INVALID_PARAMETER' });
             }
         }
     }, ['user_id', 'access_group']);
@@ -296,4 +322,78 @@ export async function grantAccess (params: Form<{
     }
 
     return await request.bind(this)('grant-access', params, { auth: true })
+}
+
+export async function getInvitations(params: Form<{
+    service?: string;
+    owner?: string;
+    email?: string;
+}>, fetchOptions?: FetchOptions): Promise<DatabaseResponse<UserProfile>> {
+    params = validator.Params(params, {
+        email: 'string',
+    });
+
+    let isAdmin = await checkAdmin.bind(this)();
+
+    if (!isAdmin) {
+        if (!this.__user) {
+            throw new SkapiError('User needs to login.', { code: 'INVALID_REQUEST' });
+        }
+
+        if (this.__user.access_group !== 99) {
+            throw new SkapiError('Invalid access.', { code: 'INVALID_REQUEST' });
+        }
+    }
+
+    let resp = await request.bind(this)('invitation-list', Object.assign({ mode: 'search' }, params), { fetchOptions, auth: true });
+    resp.list = resp.list.map((v: any) => parseUserAttributes(v.user));
+    return resp;
+}
+
+export async function cancelInvitation(params: Form<{
+    service?: string;
+    owner?: string;
+    email: string;
+}>): Promise<"SUCCESS: Invitation has been canceled."> {
+    params = validator.Params(params, {
+        email: v=>validator.Email(v),
+    }, ['email']);
+
+    let isAdmin = await checkAdmin.bind(this)();
+
+    if (!isAdmin) {
+        if (!this.__user) {
+            throw new SkapiError('User needs to login.', { code: 'INVALID_REQUEST' });
+        }
+
+        if (this.__user.access_group !== 99) {
+            throw new SkapiError('Invalid access.', { code: 'INVALID_REQUEST' });
+        }
+    }
+
+    return await request.bind(this)('invitation-list', Object.assign({ mode: 'cancel' }, params), { auth: true });
+}
+
+export async function resendInvitation(params: Form<{
+    service?: string;
+    owner?: string;
+    email: string;
+}>): Promise<"SUCCESS: Invitation has been re-sent. (User ID: xxx...)"> {
+    params = validator.Params(params, {
+        email: v=>validator.Email(v),
+    }, ['email']);
+
+    let isAdmin = await checkAdmin.bind(this)();
+
+    if (!isAdmin) {
+        if (!this.__user) {
+            throw new SkapiError('User needs to login.', { code: 'INVALID_REQUEST' });
+        }
+
+        if (this.__user.access_group !== 99) {
+            throw new SkapiError('Invalid access.', { code: 'INVALID_REQUEST' });
+        }
+    }
+
+    return await request.bind(this)('invitation-list', Object.assign({ mode: 'resend' }, params), { auth: true });
 }

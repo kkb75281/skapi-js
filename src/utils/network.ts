@@ -43,6 +43,7 @@ async function getEndpoint(dest: string, auth: boolean) {
         case 'send-inquiry':
         case 'client-secret-request-public':
         case 'block-account':
+        case 'invitation-list':
         case 'grant-access':
             return (auth ? admin.admin_private : admin.admin_public) + dest + query;
 
@@ -130,7 +131,6 @@ export async function request(
                 }
                 catch (err) {
                     this.log('request:New token error', err);
-                    await this.logout();
                     throw new SkapiError('User login is required.', { code: 'INVALID_REQUEST' });
                 }
             }
@@ -140,7 +140,6 @@ export async function request(
         }
         else {
             this.log('request:No session', null);
-            await this.logout();
             throw new SkapiError('User login is required.', { code: 'INVALID_REQUEST' });
         }
     }
@@ -240,7 +239,7 @@ export async function request(
     }
 
     if (headers['Content-Type'] !== 'application/json') {
-        // add service and owner to headers
+        // add service and owner to headers if content type is not json
         headers['Content-Meta'] = JSON.stringify({ service, owner });
     }
 

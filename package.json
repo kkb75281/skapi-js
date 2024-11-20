@@ -1,15 +1,24 @@
 {
   "name": "skapi-js",
-  "version": "1.0.157",
+  "version": "1.0.185",
   "description": "Skapi: Backend API for HTML frontend.",
-  "main": "dist/skapi.module.js",
+  "main": "dist/skapi.mjs",
+  "browser": "dist/skapi.js",
   "types": "js/Main.d.ts",
+  "exports": {
+    ".": {
+      "require": "./dist/skapi.cjs",
+      "import": "./dist/skapi.mjs",
+      "types": "./js/Main.d.ts"
+    }
+  },
   "files": [
     "js",
     "dist"
   ],
   "scripts": {
-    "build": "npx tsc --project tsconfig.json; npx webpack --config webpack.config.js;"
+    "build": "npx webpack --config webpack.config.js; cp dist/skapi.js sandbox/skapi.js",
+    "dev": "cd sandbox; npx bns 3300"
   },
   "repository": {
     "type": "git",
@@ -24,9 +33,11 @@
   "homepage": "https://www.skapi.com",
   "devDependencies": {
     "amazon-cognito-identity-js": "^6.3.12",
+    "basic-node-server": "^1.0.11",
     "ts-loader": "^9.5.1",
     "typescript": "^5.3.3",
     "webpack": "^5.74.0",
+    "webpack-bundle-analyzer": "^4.10.2",
     "webpack-cli": "^4.10.0"
   },
   "keywords": [
@@ -34,7 +45,9 @@
     "skapi",
     "api",
     "daas",
+    "baas",
     "serverless",
+    "server",
     "database"
   ]
 }

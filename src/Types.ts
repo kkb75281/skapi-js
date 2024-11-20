@@ -1,11 +1,5 @@
 export type Condition = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne' | '>' | '>=' | '<' | '<=' | '=' | '!=';
 
-export type SubscriptionGroup<T> = {
-    user_id: string;
-    /** Number range: 0 ~ 99. '*' means all groups. */
-    group?: T;
-};
-
 export type GetRecordQuery = {
     record_id?: string;
 
@@ -22,6 +16,31 @@ export type GetRecordQuery = {
         // };
         /** User ID of subscription */
         subscription?: string;
+    } | string;
+
+    reference?: string; // Referenced record ID. If user ID is given, it will fetch records that are uploaded by the user.
+
+    /** Index condition and range cannot be used simultaneously.*/
+    index?: {
+        /** Not allowed: White space, special characters. Allowed: Periods. */
+        name: string | '$updated' | '$uploaded' | '$referenced_count' | '$user_id';
+        /** Not allowed: Periods, special characters. Allowed: White space. */
+        value: string | number | boolean;
+        condition?: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne' | '>' | '>=' | '<' | '<=' | '=' | '!=';
+        range?: string | number | boolean;
+    };
+    tag?: string;
+}
+export type DelRecordQuery = {
+    record_id?: string | string[];
+
+    /** Table name not required when "record_id" is given. If string is given, "table.name" will be set with default settings. */
+    table?: {
+        /** Not allowed: Special characters. Allowed: White space. periods.*/
+        name: string;
+        /** Number range: 0 ~ 99. Default: 'public' */
+        access_group?: number | 'private' | 'public' | 'authorized';
+        subscription?: boolean;
     } | string;
 
     reference?: string; // Referenced record ID. If user ID is given, it will fetch records that are uploaded by the user.
@@ -59,6 +78,7 @@ export type PostRecordConfig = {
         record_id?: string; // null removes reference
         reference_limit?: number | null; // Default: null (Infinite)
         allow_multiple_reference?: boolean; // Default: true
+        can_remove_reference?: boolean; // Default: false. When true, owner of the record can remove any record that are referencing this record and when deleted, all the record referencing this record will be deleted.
     } | string;
 
     /** null removes index */
@@ -102,6 +122,7 @@ export type RecordData = {
         reference_limit: number;
         allow_multiple_reference: boolean;
         referenced_count: number;
+        can_remove_reference: boolean;
     },
     index?: {
         name: string;
@@ -118,19 +139,23 @@ export type Connection = {
     /** User's locale */
     locale: string;
     /** Service owner's ID */
-    owner: string;
+    // owner: string;
     /** E-Mail address of the service owner */
-    email: string;
+    // email: string;
     /** Service ID */
-    service: string;
+    // service: string;
     /** Service region */
-    region: string;
+    // region: string;
     /** 13 digits timestamp of the service creation */
-    timestamp: number;
+    // timestamp: number;
+    /** User agent info */
+    user_agent: string;
     /** Connected user's IP address */
     ip: string;
     /** Service level */
     group: number;
+    /** Service name */
+    service_name: string;
     /** Service options */
     opt: {
         freeze_database:boolean;
@@ -164,7 +189,7 @@ export type Newsletters = {
 };
 
 export type UserProfilePublicSettings = {
-    /** User's E-mail is public when true. E-Mail should be verified. */
+    /** User's E-Mail is public when true. E-Mail should be verified. */
     email_public?: boolean;
     /** User's phone number is public when true. Phone number should be verified. */
     phone_number_public?: boolean;
@@ -352,3 +377,14 @@ export type Service = {
     /** Number of users in the service. */
     users: number;
 };
+
+export type FileInfo = {
+    url: string;
+    filename: string;
+    access_group: number | 'private' | 'public' | 'authorized';
+    filesize: number;
+    record_id: string;
+    uploader: string;
+    uploaded: number;
+    fileKey: string;
+}

@@ -15,7 +15,7 @@ import {
 } from '../Types';
 import validator from '../utils/validator';
 import { request } from '../utils/network';
-import { MD5, fromBase62 } from '../utils/utils';
+import { MD5, fromBase62, parseUserAttributes } from '../utils/utils';
 
 let cognitoUser: CognitoUser | null = null;
 
@@ -173,175 +173,93 @@ export function authentication() {
 
     const getUserProfile = (): UserProfile => {
         // get users updated attribute
-        if (!this.session) {
-            this.session = null;
-            return null;
-        }
-        if (cognitoUser === null) {
-            this.session = null;
-            throw new SkapiError('Invalid session', { code: 'INVALID_REQUEST' });
-        }
-
-        let attr = cognitoUser?.getSignInUserSession()?.getIdToken()?.payload || null;
-        if (!attr) {
-            this.session = null;
-            return null;
-        }
-
-        let user: any = {};
+        let attr = cognitoUser.getSignInUserSession().getIdToken().payload || null;
         this.log('attributes to normalize:', attr);
 
         // parse attribute structure: [ { Name, Value }, ... ]
-        for (let name in attr) {
-            let value = attr[name];
-
-            let excludes = ['aud', 'cognito:username', 'event_id', 'exp', 'iat', 'iss', 'jti', 'origin_jti', 'secret_key', 'token_use'];
-            let converts = {
-                auth_time: 'log',
-                sub: 'user_id'
-            }
-
-            if (excludes.includes(name)) continue;
-
-            if (converts[name]) name = converts[name];
-
-            else if (name.includes('custom:')) {
-                if (name === 'custom:service' && value !== this.service) {
-                    throw new SkapiError('The user is not registered to the service.', { code: 'INVALID_REQUEST' });
-                }
-                user[name.replace('custom:', '')] = value;
-            }
-
-            else if (name === 'address') {
-                let addr_main: any = value;
-                if (addr_main && typeof addr_main === 'object' && Object.keys(addr_main).length) {
-                    if (addr_main?.formatted) {
-                        try {
-                            user[name] = JSON.parse(addr_main.formatted);
-                        }
-                        catch (err) {
-                            user[name] = addr_main.formatted;
-                        }
-                    }
-                }
-                else {
-                    user[name] = addr_main;
-                }
-            }
-            else {
-                user[name] = value;
-            }
-        }
-
-        for (let k of [
-            'address_public',
-            'birthdate_public',
-            'email_public',
-            'gender_public',
-            'phone_number_public',
-            'access_group'
-        ]) {
-            if (k.includes('_public')) {
-                if (user.hasOwnProperty(k.split('_')[0])) user[k] = user.hasOwnProperty(k) ? !!Number(user[k]) : false;
-                else delete user[k];
-            }
-            else user[k] = user.hasOwnProperty(k) ? Number(user[k]) : 0;
-        }
-
-        for (let k of [
-            'email',
-            'phone_number'
-        ]) {
-            if (user.hasOwnProperty(k)) {
-                user[k + '_verified'] = user[k + '_verified'] === true;
-            }
-            else {
-                delete user[k + '_verified'];
-            }
-        }
-
+        let user = parseUserAttributes(attr);
         this.__user = user;
         return user;
     };
 
 
-    const getSession = async (option?: { refreshToken?: boolean; }): Promise<CognitoUserSession> => {
+    const getSession = async (option?: { refreshToken?: boolean; _holdLogin?: boolean }): Promise<CognitoUserSession | Function> => {
         // fetch session, updates user attributes
         let { refreshToken = false } = option || {};
 
         return new Promise((res, rej) => {
-            cognitoUser = this.userPool?.getCurrentUser() || null;
+            cognitoUser = this.userPool.getCurrentUser();
 
-            if (cognitoUser === null) {
-                this.log('getSession:cognitoUser:', cognitoUser);
-                this.session = null;
-                // no user session
+            if (!cognitoUser) {
+                this.log('getSession:cognitoUser', cognitoUser);
+                // no user session. wasn't logged in.
+                _out.bind(this)();
                 rej(null);
                 return;
             }
 
             cognitoUser.getSession((err: any, session: CognitoUserSession) => {
-                this.log('getSession:getSessionCallback:', { err, session });
+                this.log('getSession:getSessionCallback', { err, session });
 
                 if (err) {
-                    this.session = null;
-                    if (typeof this.loginHandle === 'function') {
-                        this.loginHandle(null);
-                    }
+                    _out.bind(this)();
                     rej(err);
                     return;
                 }
 
                 if (!session) {
-                    this.session = null;
-                    if (typeof this.loginHandle === 'function') {
-                        this.loginHandle(null);
-                    }
+                    _out.bind(this)();
                     rej(new SkapiError('Current session does not exist.', { code: 'INVALID_REQUEST' }));
                     return;
                 }
 
-                let respond = (session) => {
-                    let sessionAttribute = session.getIdToken().payload;
+                let respond = async (s: CognitoUserSession) => {
+                    let sessionAttribute = s.getIdToken().payload;
                     this.log('getSession:respond:sessionAttribute', sessionAttribute);
 
                     if (sessionAttribute['custom:service'] !== this.service) {
                         this.log('getSession:respond', 'invalid service, signing out');
-                        logout.bind(this)();
+                        _out.bind(this)();
                         rej(new SkapiError('Invalid session.', { code: 'INVALID_REQUEST' }));
                         return;
                     }
 
-                    this.session = session;
-                    getUserProfile();
-                    if (typeof this.loginHandle === 'function') {
-                        this.loginHandle(this.user);
+                    if (option?._holdLogin) {
+                        // hold login
+                        res(() => {
+                            this.session = s;
+                            getUserProfile();
+                            this._runOnLoginListeners(this.user);
+                            return this.session;
+                        });
+                        return;
                     }
-
+                    this.session = s;
+                    getUserProfile();
+                    this._runOnLoginListeners(this.user);
                     res(this.session);
                 }
+
                 // try refresh when invalid token
                 if (refreshToken || !session.isValid()) {
-                    cognitoUser.refreshSession(session.getRefreshToken(), (refreshErr, refreshedSession) => {
-                        this.log('getSession:refreshSessionCallback:', { err, session });
+                    cognitoUser.refreshSession(session.getRefreshToken(), async (refreshErr, refreshedSession) => {
+                        this.log('getSession:refreshSessionCallback:', { err, refreshedSession });
 
                         if (refreshErr) {
+                            _out.bind(this)();
                             rej(refreshErr);
-                            return;
                         }
-                        if (refreshedSession.isValid()) {
+                        else if (refreshedSession.isValid()) {
                             respond(refreshedSession);
-                            return;
                         }
                         else {
+                            _out.bind(this)();
                             rej(new SkapiError('Invalid session.', { code: 'INVALID_REQUEST' }));
-                            return;
                         }
                     });
                 }
                 else {
                     respond(session);
-                    return;
                 }
             });
         });
@@ -462,7 +380,6 @@ export function authentication() {
         getSession,
         authenticateUser,
         createCognitoUser,
-        getUserProfile,
         signup
     };
 }
@@ -490,9 +407,7 @@ export async function checkAdmin() {
     return false;
 }
 
-export async function logout(): Promise<'SUCCESS: The user has been logged out.'> {
-    await this.__connection;
-
+export function _out() {
     if (cognitoUser) {
         cognitoUser.signOut();
     }
@@ -508,10 +423,12 @@ export async function logout(): Promise<'SUCCESS: The user has been logged out.'
         this[k] = to_be_erased[k];
     }
 
-    if (typeof this.loginHandle === 'function') {
-        this.loginHandle(null);
-    }
+    this._runOnLoginListeners(null);
+}
 
+export async function logout(): Promise<'SUCCESS: The user has been logged out.'> {
+    await this.__connection;
+    _out.bind(this)();
     return 'SUCCESS: The user has been logged out.';
 }
 
@@ -600,6 +517,8 @@ export async function login(
         password: 'string'
     }, ['password']);
 
+    await this.__authConnection;
+
     if (params.email) {
         // incase user uses email instead of username
         try {
@@ -628,6 +547,8 @@ export async function signup(
         login?: boolean;
     }): Promise<UserProfile | "SUCCESS: The account has been created. User's signup confirmation is required." | 'SUCCESS: The account has been created.'> {
 
+    await this.__authConnection;
+
     let paramRestrictions = {
         username: 'string',
         password: (v: string) => validator.Password(v),
@@ -648,8 +569,8 @@ export async function signup(
             return undefined;
         },
         gender: 'string',
-        birthdate: (v: string) => validator.Birthdate(v),
-        phone_number: (v: string) => validator.PhoneNumber(v),
+        birthdate: (v: string) => v ? validator.Birthdate(v) : "",
+        phone_number: (v: string) => v ? validator.PhoneNumber(v) : "",
 
         email_public: ['boolean', () => false],
         address_public: ['boolean', () => false],
@@ -659,13 +580,13 @@ export async function signup(
         access_group: 'number', // v=>{if(v > 0 && v < 100) return v else throw SkapiError(...)}
         misc: 'string',
 
-        picture: (v: string) => { if (v) return validator.Url(v); else return undefined },
-        profile: (v: string) => { if (v) return validator.Url(v); else return undefined },
+        picture: (v: string) => { if (v) return validator.Url(v); else return "" },
+        profile: (v: string) => { if (v) return validator.Url(v); else return "" },
         family_name: 'string',
         given_name: 'string',
         middle_name: 'string',
         nickname: 'string',
-        website: (v: string) => { if (v) return validator.Url(v); else return undefined },
+        website: (v: string) => { if (v) return validator.Url(v); else return "" },
     };
 
     let params = validator.Params(form || {}, paramRestrictions, ['email', 'password']);
@@ -1029,8 +950,8 @@ export async function updateProfile(form: Form<UserAttributes>): Promise<UserPro
         },
         name: 'string',
         gender: 'string',
-        birthdate: (v: string) => validator.Birthdate(v),
-        phone_number: (v: string) => validator.PhoneNumber(v),
+        birthdate: (v: string) => v ? validator.Birthdate(v) : "",
+        phone_number: (v: string) => v ? validator.PhoneNumber(v) : "",
         email_public: 'boolean',
         phone_number_public: 'boolean',
         address_public: 'boolean',
@@ -1038,13 +959,13 @@ export async function updateProfile(form: Form<UserAttributes>): Promise<UserPro
         birthdate_public: 'boolean',
         misc: 'string',
 
-        picture: (v: string) => validator.Url(v),
-        profile: (v: string) => validator.Url(v),
+        picture: (v: string) => v ? validator.Url(v) : "",
+        profile: (v: string) => v ? validator.Url(v) : "",
         family_name: 'string',
         given_name: 'string',
         middle_name: 'string',
         nickname: 'string',
-        website: (v: string) => validator.Url(v),
+        website: (v: string) => v ? validator.Url(v) : "",
     });
 
     if (params && typeof params === 'object' && !Object.keys(params).length) {
@@ -1138,7 +1059,7 @@ export async function updateProfile(form: Form<UserAttributes>): Promise<UserPro
 export async function getUsers(
     params?: {
         searchFor: string;
-        value: string | number | boolean;
+        value: string | number | boolean | string[];
         condition?: '>' | '>=' | '=' | '<' | '<=' | '!=' | 'gt' | 'gte' | 'eq' | 'lt' | 'lte' | 'ne';
         range?: string | number | boolean;
     },
@@ -1161,7 +1082,15 @@ export async function getUsers(
     await this.__connection;
 
     const searchForTypes = {
-        'user_id': (v: string) => validator.UserId(v),
+        'user_id': (v: string) => {
+            if (Array.isArray(v)) {
+                for (let id of v) {
+                    validator.UserId(id);
+                }
+                return v;
+            }
+            return validator.UserId(v)
+        },
         'email': (v: string) => validator.Email(v),
         'phone_number': (v: string) => validator.PhoneNumber(v),
         'locale': (v: string) => {
