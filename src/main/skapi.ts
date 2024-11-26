@@ -14,7 +14,11 @@ import {
     PublicUser,
     UserProfilePublicSettings,
     FileInfo,
-    DelRecordQuery
+    DelRecordQuery,
+    RTCCallback,
+    RealtimeCallback,
+    RTCConnectorParams,
+    RTCConnector,
 } from '../Types';
 import {
     CognitoUserPool
@@ -42,8 +46,11 @@ import {
     closeRealtime,
     getRealtimeUsers,
     getRealtimeGroups,
-    connectRTC
 } from '../methods/realtime';
+import {
+    closeRTC,
+    connectRTC
+} from '../methods/webrtc';
 import {
     secureRequest,
     mock,
@@ -113,12 +120,14 @@ import {
 } from '../methods/admin';
 export default class Skapi {
     // current version
-    private __version = '1.0.185';
+    private __version = '1.0.188-beta.1';
     service: string;
     owner: string;
     session: Record<string, any> | null = null;
     connection: Connection | null = null;
-    userPool: CognitoUserPool | null = null;
+    private userPool: CognitoUserPool | null = null;
+    private __socket: Promise<WebSocket> | null = null;
+    private __mediaStream: MediaStream = null;
 
     private host = 'skapi';
     private hostDomain = 'skapi.com';
@@ -186,8 +195,8 @@ export default class Skapi {
         }
     }
 
-    admin_endpoint: Promise<Record<string, any>>;
-    record_endpoint: Promise<Record<string, any>>;
+    private admin_endpoint: Promise<Record<string, any>>;
+    private record_endpoint: Promise<Record<string, any>>;
 
     validate = {
         userId(val: string) {
@@ -229,6 +238,9 @@ export default class Skapi {
             } catch (err) {
                 return false;
             }
+        },
+        params(val: any, schema: Record<string, any>, required?: string[]) {
+            return validator.Params(val, schema, required);
         }
     };
 
@@ -254,11 +266,7 @@ export default class Skapi {
 
     private __connection: Promise<Connection>;
     private __authConnection: Promise<void>;
-    private __socket: WebSocket;
-    private __socket_room: string;
     private __network_logs = false;
-    private __sdpoffer: RTCSessionDescriptionInit;
-    private peerConnection: RTCPeerConnection;
 
     constructor(service: string, owner: string, options?: {
         autoLogin: boolean;
@@ -266,24 +274,24 @@ export default class Skapi {
             onLogin: (user: UserProfile) => void;
         }
     }, __etc?: any) {
-        if(!window) {
-            throw new SkapiError('This library is for browser only.', { code: 'NOT_SUPPORTED' });
+        if (!sessionStorage) {
+            throw new SkapiError('Web browser API is not available.', { code: 'NOT_SUPPORTED' });
         }
-        window.sessionStorage.setItem('__skapi_kiss', 'kiss');
-        if (window.sessionStorage.getItem('__skapi_kiss') !== 'kiss') {
-            window.alert('Session storage is disabled. Please enable session storage.');
+        sessionStorage.setItem('__skapi_kiss', 'kiss');
+        if (sessionStorage.getItem('__skapi_kiss') !== 'kiss') {
+            alert('Session storage is disabled. Please enable session storage.');
             throw new SkapiError('Session storage is disabled. Please enable session storage.', { code: 'SESSION_STORAGE_DISABLED' });
         }
 
-        window.sessionStorage.removeItem('__skapi_kiss');
+        sessionStorage.removeItem('__skapi_kiss');
 
         if (typeof service !== 'string' || typeof owner !== 'string') {
-            window.alert("Service ID or Owner ID is invalid.");
+            alert("Service ID or Owner ID is invalid.");
             throw new SkapiError('"service" and "owner" should be type <string>.', { code: 'INVALID_PARAMETER' });
         }
 
         if (!service || !owner) {
-            window.alert("Service ID or Owner ID is invalid.");
+            alert("Service ID or Owner ID is invalid.");
             throw new SkapiError('"service" and "owner" is required', { code: 'INVALID_PARAMETER' });
         }
 
@@ -291,7 +299,7 @@ export default class Skapi {
             try {
                 validator.UserId(owner, '"owner"');
             } catch (err: any) {
-                window.alert("Service ID or Owner ID is invalid.");
+                alert("Service ID or Owner ID is invalid.");
                 throw err;
             }
         }
@@ -330,7 +338,7 @@ export default class Skapi {
             }))
             .then(data => {
                 try {
-                    return typeof data === 'string' ? JSON.parse(window.atob(data.split(',')[1])) : null
+                    return typeof data === 'string' ? JSON.parse(atob(data.split(',')[1])) : null
                 }
                 catch (err) {
                     throw new SkapiError('Service does not exist. Create your service from skapi.com', { code: 'NOT_EXISTS' });
@@ -347,19 +355,19 @@ export default class Skapi {
             }))
             .then(data => {
                 try {
-                    return typeof data === 'string' ? JSON.parse(window.atob(data.split(',')[1])) : null
+                    return typeof data === 'string' ? JSON.parse(atob(data.split(',')[1])) : null
                 }
                 catch (err) {
                     throw new SkapiError('Service does not exist. Create your service from skapi.com', { code: 'NOT_EXISTS' });
                 }
             });
 
-        if (!window.sessionStorage) {
-            window.alert('This browser is not supported.');
+        if (!sessionStorage) {
+            alert('This browser is not supported.');
             throw new Error(`This browser is not supported.`);
         }
 
-        const restore = JSON.parse(window.sessionStorage.getItem(`${service}#${owner}`) || 'null');
+        const restore = JSON.parse(sessionStorage.getItem(`${service}#${owner}`) || 'null');
 
         this.log('constructor:restore', restore);
 
@@ -391,11 +399,8 @@ export default class Skapi {
                         (fireWhenAutoLogin as Function)();
                     }
                 }
-                else {
-                    // _out.bind(this)();
-                }
-            } catch (err) {
-                // _out.bind(this)();
+            }
+            catch (err) {
             }
         })()
 
@@ -429,7 +434,7 @@ export default class Skapi {
                             data[k] = this[k];
                         }
 
-                        window.sessionStorage.setItem(`${service}#${owner}`, JSON.stringify(data));
+                        sessionStorage.setItem(`${service}#${owner}`, JSON.stringify(data));
                         this.__class_properties_has_been_cached = true;
                     }
                 };
@@ -438,12 +443,12 @@ export default class Skapi {
             };
 
             // attach event to save session on close
-            window.addEventListener('beforeunload', () => {
+            addEventListener('beforeunload', () => {
                 this.closeRealtime();
                 storeClassProperties();
             });
             // for mobile
-            window.addEventListener("visibilitychange", () => {
+            addEventListener("visibilitychange", () => {
                 storeClassProperties();
             });
 
@@ -487,7 +492,7 @@ export default class Skapi {
         }
         catch (err: any) {
             this.log('Connection fail', err);
-            window.alert('Service is not available: ' + (err.message || err.toString()));
+            alert('Service is not available: ' + (err.message || err.toString()));
 
             this.connection = null;
             throw err;
@@ -509,41 +514,34 @@ export default class Skapi {
         return this.__version;
     }
 
-    log(n: string, v: any) {
+    private log(n: string, v: any) {
         if (this.__network_logs) {
             try {
-                console.log(n, JSON.parse(JSON.stringify(v)));
+                console.log(`%c${n}`, 'color: blue;', JSON.parse(JSON.stringify(v)));
             } catch (err) {
-                console.log(n, v);
+                console.log(`%c${n}`, 'color: blue;', v);
             }
         }
     }
 
     @formHandler()
+    closeRTC(params: { cid?: string; close_all?: boolean; }): Promise<void> {
+        return closeRTC.bind(this)(params);
+    }
+
+    @formHandler()
     connectRTC(
-        params: {
-            recipient: string;
-            ice?: string;
-            callback?: {
-                onicecandidate?: (e:any)=>void;
-                onnegotiationneeded?: (e:any)=>void;
-                onerror?: (e:any)=>void;
-            }
-        }
-    ): Promise<any> {
-        return connectRTC.bind(this)(params);
+        params: RTCConnectorParams,
+        callback?: RTCCallback
+    ): Promise<RTCConnector> {
+        return connectRTC.bind(this)(params, callback);
     }
 
-    connectRealtime(cb: (rt: {
-        type: 'message' | 'error' | 'success' | 'close' | 'notice' | 'private' | 'sdpOffer' | 'sdpBroadcast';
-        message: any;
-        sender?: string; // user_id of the sender
-        sender_cid?: string; // connection id of the sender
-    }) => Promise<WebSocket>) {
-        return connectRealtime.bind(this)(cb);
+    connectRealtime(callback: RealtimeCallback): Promise<WebSocket> {
+        return connectRealtime.bind(this)(callback);
     }
 
-    jwtLogin(params: {
+    private jwtLogin(params: {
         idToken: string;
         keyUrl: string;
         clientId: string;
@@ -556,6 +554,7 @@ export default class Skapi {
     @formHandler()
     resendInvitation(params: Form<{
         email: string;
+        confirmation_url?: string;
     }>): Promise<"SUCCESS: Invitation has been re-sent. (User ID: xxx...)"> {
         return resendInvitation.bind(this)(params);
     }
@@ -606,7 +605,7 @@ export default class Skapi {
     }
 
     @formHandler()
-    getRealtimeUsers(params: { group: string, user_id?: string }, fetchOptions?: FetchOptions): Promise<DatabaseResponse<{ user_id: string; connection_id: string }[]>> {
+    getRealtimeUsers(params: { group: string, user_id?: string }, fetchOptions?: FetchOptions): Promise<DatabaseResponse<{ user_id: string; cid: string }[]>> {
         return getRealtimeUsers.bind(this)(params, fetchOptions);
     }
 

@@ -116,4 +116,5 @@ deploy.py
 test.js
 test.html
 package-lock.json
-sandbox/
+sandbox
+sandbox_deploy.py

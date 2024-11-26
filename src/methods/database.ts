@@ -42,14 +42,19 @@ export async function normalizeRecord(record: Record<string, any>): Promise<Reco
 
     const keys = {
         'ip': (r: string) => {
-            if (r.slice(-1) === 'R') {
+            let split_ip = r.split('#');
+            let ip = split_ip[0];
+            if (split_ip.length > 1) {
+                output.unique_id = split_ip[1];
+            }
+            if (ip.slice(-1) === 'R') {
                 output.readonly = true;
-                r = r.slice(0, -1);
+                ip = ip.slice(0, -1);
             }
             else {
                 output.readonly = false;
             }
-            output.ip = r;
+            output.ip = ip;
         },
         'rec': (r: string) => {
             if (!r) return;
@@ -155,7 +160,7 @@ export async function normalizeRecord(record: Record<string, any>): Promise<Reco
                     if (access_group !== 'public') {
                         url_endpoint = (await getFile.bind(this)(url, { dataType: 'endpoint' }) as string);
                     }
-
+                    // auth/serviceid/ownerid/uploaderid/records/recordid/access_group/bin/timestamp_base62/size_base62/form_keyname/filename.ext
                     let obj = {
                         access_group,
                         filename,
@@ -181,8 +186,8 @@ export async function normalizeRecord(record: Record<string, any>): Promise<Reco
             }
             output.bin = binObj;
         },
-        'prv_acs': (r: {[key: string]: string}) => {
-            if(r?.can_remove_reference) {
+        'prv_acs': (r: { [key: string]: string }) => {
+            if (r?.can_remove_reference) {
                 output.reference.can_remove_reference = r.can_remove_reference;
             }
         },
@@ -325,7 +330,7 @@ export async function getFile(
     });
 
 
-    if(config?.dataType === 'info') {
+    if (config?.dataType === 'info') {
         // auth(publ)/service-id/owner-id/user-id/records/rec-id/**/file(bin)/sizetag/filename
         return {
             url,
@@ -343,7 +348,7 @@ export async function getFile(
     let expires = config.expires;
 
     if (expires) {
-        if(!isValidEndpoint) {
+        if (!isValidEndpoint) {
             throw new SkapiError('Expires option can only be used on skapi cdn endpoints.', { code: 'INVALID_PARAMETER' });
         }
 
@@ -395,7 +400,7 @@ export async function getFile(
 
         let access_group = target_key[6] === '**' ? '**' : parseInt(target_key[6]);
 
-        if(this.user.user_id !== target_key[3] && (access_group === '**' || this.user?.access_group < access_group)) {
+        if (this.user.user_id !== target_key[3] && (access_group === '**' || this.user?.access_group < access_group)) {
             let record_id = target_key[5];
             if (this.__private_access_key[record_id]) {
                 url += '&p=' + this.__private_access_key[record_id];
@@ -455,10 +460,21 @@ export async function getRecords(query: GetRecordQuery & { private_key?: string;
 
     let is_reference_fetch = '';
     let ref_user = '';
-
-    if (query?.record_id) {
+    if (query?.unique_id) {
+        let outputObj: Record<string, string> = { unique_id: query.unique_id };
+        is_reference_fetch = query.unique_id;
+        if ((query as any)?.service) {
+            outputObj.service = (query as any).service;
+        }
+        query = outputObj;
+        if (this.__private_access_key[query.unique_id]) {
+            query.private_key = this.__private_access_key[query.unique_id];
+        }
+    }
+    else if (query?.record_id) {
         validator.specialChars(query.record_id, 'record_id', false, false);
         let outputObj: Record<string, string> = { record_id: query.record_id };
+        is_reference_fetch = query.record_id;
         if ((query as any)?.service) {
             outputObj.service = (query as any).service;
         }
@@ -467,8 +483,15 @@ export async function getRecords(query: GetRecordQuery & { private_key?: string;
             query.private_key = this.__private_access_key[query.record_id];
         }
     }
-
     else {
+        if (typeof query?.reference === 'string') {
+            try {
+                (query.reference as any) = {
+                    user_id: validator.UserId(query.reference)
+                }
+            }
+            catch (err) { }
+        }
         const struct = {
             table: {
                 name: [v => {
@@ -534,20 +557,36 @@ export async function getRecords(query: GetRecordQuery & { private_key?: string;
                     return v;
                 }
                 if (typeof v === 'string') {
-                    try {
-                        ref_user = validator.UserId(v);
-                    }
-                    catch (err) {
-                        // reference is record id
-                        validator.specialChars(v, 'reference', false, false);
-                        is_reference_fetch = v;
-                        if (this.__private_access_key[is_reference_fetch]) {
-                            query.private_key = this.__private_access_key[is_reference_fetch];
-                        }
-                    }
+                    // try {
+                    //     ref_user = validator.UserId(v);
+                    // }
+                    // catch (err) {
+                    //     // reference is record id
+                    //     validator.specialChars(v, 'reference', false, false);
+                    //     is_reference_fetch = v;
+                    //     if (this.__private_access_key[is_reference_fetch]) {
+                    //         query.private_key = this.__private_access_key[is_reference_fetch];
+                    //     }
+                    // }
 
-                    is_reference_fetch = v;
+                    // is_reference_fetch = v;
                     return v;
+                }
+                else if (typeof v === 'object') {
+                    return validator.Params(v, {
+                        record_id: v => {
+                            if (v === null || v === undefined) {
+                                return v;
+                            }
+                            validator.specialChars(v, 'reference.record_id', false, false);
+                            if (this.__private_access_key[v]) {
+                                query.private_key = this.__private_access_key[v];
+                            }
+                            return v;
+                        },
+                        unique_id: 'string',
+                        user_id: validator.UserId,
+                    });
                 }
                 else {
                     throw new SkapiError('"reference" should be type: string.', { code: 'INVALID_PARAMETER' });
@@ -694,11 +733,19 @@ export async function postRecord(
     }
 
     if (typeof config.reference === 'string') {
-        config.reference = {
-            record_id: config.reference
+        try {
+            validator.specialChars(config.reference, '"reference"', false, false);
+            config.reference = {
+                record_id: config.reference
+            }
+        } catch (err) {
+            (config.reference as any) = {
+                unique_id: config.reference
+            }
         }
     }
     let _config = validator.Params(config || {}, {
+        unique_id: 'string',
         record_id: ['string', () => {
             if (!config.table || !config.table.name) {
                 throw new SkapiError('"table.name" is required.', { code: 'INVALID_PARAMETER' });
@@ -732,7 +779,7 @@ export async function postRecord(
                 }
 
                 if (typeof v === 'number') {
-                    if (!isAdmin && this.user.access_group < v) {
+                    if (!isAdmin && this.user.access_group < v && !(config.reference as any).record_id) {
                         throw new SkapiError("User has no access", { code: 'INVALID_REQUEST' });
                     }
                 }
@@ -745,6 +792,7 @@ export async function postRecord(
             }
         },
         reference: {
+            unique_id: 'string',
             record_id: v => {
                 validator.specialChars(v, '"reference.record_id"', false, false);
                 if (this.__private_access_key[v]) {
@@ -1176,13 +1224,13 @@ export async function deleteRecords(query: DelRecordQuery & { private_key?: stri
                     if (!this.__user) {
                         throw new SkapiError('Unsigned users have no access to subscription records.', { code: 'INVALID_REQUEST' });
                     }
-                    if(typeof v === 'boolean') {
+                    if (typeof v === 'boolean') {
                         v = this.__user.user_id;
                     }
                     else {
                         validator.UserId(v, 'User ID in "subscription"')
                     }
-                    
+
                     return {
                         user_id: v,
                         group: 1
@@ -1301,7 +1349,7 @@ export async function deleteRecords(query: DelRecordQuery & { private_key?: stri
         };
 
         query = validator.Params(query || {}, struct, ref_user || isAdmin ? [] : ['table']);
-        
+
         let result = await request.bind(this)('del-records', query, { auth: true });
         if (is_reference_fetch && result?.reference_private_key) {
             this.__private_access_key[is_reference_fetch] = result.reference_private_key;
@@ -1368,20 +1416,20 @@ export async function listPrivateRecordAccess(params: {
     return list;
 }
 
-export function requestPrivateRecordAccessKey(params: {record_id: string | string[]}): Promise<{[record_id:string]:string}> {
-    let record_id:string | string[] = params.record_id;
+export function requestPrivateRecordAccessKey(params: { record_id: string | string[] }): Promise<{ [record_id: string]: string }> {
+    let record_id: string | string[] = params.record_id;
     if (!record_id) {
         throw new SkapiError(`Record ID is required.`, { code: 'INVALID_PARAMETER' });
     }
-    
-    if(typeof record_id === 'string') {
+
+    if (typeof record_id === 'string') {
         record_id = [record_id];
     }
 
-    if(typeof record_id !== 'string') {
-        if(Array.isArray(record_id)) {
+    if (typeof record_id !== 'string') {
+        if (Array.isArray(record_id)) {
             record_id.forEach((id) => {
-                if(typeof id !== 'string') {
+                if (typeof id !== 'string') {
                     throw new SkapiError(`Record ID should be type: <string | string[]>`, { code: 'INVALID_PARAMETER' });
                 }
             });
@@ -1397,7 +1445,7 @@ export function requestPrivateRecordAccessKey(params: {record_id: string | strin
         { auth: true }
     );
 
-    for(let i in res) {
+    for (let i in res) {
         this.__private_access_key[i] = res[i];
     }
 

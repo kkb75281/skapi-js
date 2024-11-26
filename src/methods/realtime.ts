@@ -3,7 +3,18 @@ import SkapiError from '../main/error';
 import validator from '../utils/validator';
 import { extractFormData } from '../utils/utils';
 import { request } from '../utils/network';
-import { DatabaseResponse, FetchOptions } from '../Types';
+import { DatabaseResponse, FetchOptions, RealtimeCallback, WebSocketMessage } from '../Types';
+import { answerSdpOffer, receiveIceCandidate, __peerConnection, __receiver_ringing, closeRTC, respondRTC, __caller_ringing, __rtcCallbacks } from './webrtc';
+
+let __roomList: {
+    [realTimeGroup: string]: {
+        [sender_id: string]: string[]; // connection id, (single person can have multiple connection id)
+    }
+} = {};
+
+let __current_socket_room: string;
+let __keepAliveInterval = null;
+let __cid: {[user_id:string]:string} = {};
 
 async function prepareWebsocket() {
     // Connect to the WebSocket server
@@ -20,208 +31,227 @@ async function prepareWebsocket() {
     );
 }
 
-type RealtimeCallback = (rt: {
-    type: 'message' | 'error' | 'success' | 'close' | 'notice' | 'private' | 'sdpOffer' | 'sdpBroadcast';
-    message: any;
-    sender?: string; // user_id of the sender
-    sender_cid?: string; // scid of the sender
-}) => void;
-
-let reconnectAttempts = 0;
-
-let __roomList = {}; // { group: { user_id: [connection_id, ...] } }
-let __roomPending = {}; // { group: Promise }
-let __keepAliveInterval = null;
-export function connectRealtime(cb: RealtimeCallback, delay = 0): Promise<WebSocket> {
+export function connectRealtime(cb: RealtimeCallback, delay = 10): Promise<WebSocket> {
     if (typeof cb !== 'function') {
         throw new SkapiError(`Callback must be a function.`, { code: 'INVALID_REQUEST' });
     }
 
-    if (reconnectAttempts || !(this.__socket instanceof Promise)) {
-        this.__socket = new Promise(async resolve => {
-            setTimeout(async () => {
-                await this.__connection;
+    if (this.__socket instanceof Promise) {
+        return this.__socket;
+    }
 
-                let user = await this.getProfile();
-                if (!user) {
-                    throw new SkapiError(`No access.`, { code: 'INVALID_REQUEST' });
+    this.__socket = new Promise(resolve => {
+        setTimeout(async () => {
+            let socket: WebSocket = await prepareWebsocket.bind(this)();
+
+            socket.onopen = () => {
+                this.log('realtime onopen', 'Connected to WebSocket server.');
+                cb({ type: 'success', message: 'Connected to WebSocket server.' });
+
+                if (__current_socket_room) {
+                    socket.send(JSON.stringify({
+                        action: 'joinRoom',
+                        rid: __current_socket_room,
+                        token: this.session.accessToken.jwtToken
+                    }));
                 }
 
-                let socket: WebSocket = await prepareWebsocket.bind(this)();
-
-                socket.onopen = () => {
-                    reconnectAttempts = 0;
-                    cb({ type: 'success', message: 'Connected to WebSocket server.' });
-
-                    if (this.__socket_room) {
+                // keep alive
+                __keepAliveInterval = setInterval(() => {
+                    if (socket.readyState === 1) {
                         socket.send(JSON.stringify({
-                            action: 'joinRoom',
-                            rid: this.__socket_room,
+                            action: 'keepAlive',
                             token: this.session.accessToken.jwtToken
                         }));
                     }
+                }, 30000);
 
-                    // keep alive
-                    __keepAliveInterval = setInterval(() => {
-                        if (socket.readyState === 1) {
-                            socket.send(JSON.stringify({
-                                action: 'keepAlive',
-                                token: this.session.accessToken.jwtToken
-                            }));
-                        }
-                    }, 30000);
+                resolve(socket);
+            };
 
-                    resolve(socket);
-                };
+            socket.onmessage = async (event) => {
+                let data = ''
 
-                socket.onmessage = async (event) => {
-                    let data = ''
-                    try {
-                        data = JSON.parse(decodeURI(event.data));
-                        this.log('onmessage', data);
-                    }
-                    catch (e) {
-                        return;
-                    }
-                    let type: 'message' | 'error' | 'success' | 'close' | 'notice' | 'private' | 'sdpOffer' | 'sdpBroadcast' = 'message';
-                    let sdp = '';
-                    if (data?.['#message']) {
+                try {
+                    data = JSON.parse(decodeURI(event.data));
+                    this.log('socket onmessage', data);
+                }
+                catch (e) {
+                    return;
+                }
+
+                let type;
+                switch (true) {
+                    case !!data?.['#message']:
                         type = 'message';
-                    }
-
-                    else if (data?.['#private']) {
+                        break;
+                    case !!data?.['#private']:
                         type = 'private';
-                    }
-
-                    else if (data?.['#notice']) {
+                        break;
+                    case !!data?.['#notice']:
                         type = 'notice';
-                    }
+                        break;
+                    case !!data?.['#rtc']:
+                        type = 'rtc';
+                        break;
+                    case !!data?.['#error']:
+                        type = 'error';
+                        break;
+                }
 
-                    else if (data?.['#sdpOffer']) {
-                        type = 'sdpOffer';
-                        sdp = data['#sdpOffer'];
-                        try {
-                            sdp = JSON.parse(sdp);
+                let msg: WebSocketMessage = {
+                    type,
+                    message: data?.['#rtc'] || data?.['#message'] || data?.['#private'] || data?.['#notice'] || data?.['#error'] || null,
+                    sender: !!data['#user_id'] ? data['#user_id'] : null,
+                    sender_cid: !!data?.['#scid'] ? "cid:" + data['#scid'] : null,
+                    sender_rid: !!data?.['#srid'] ? data['#srid'] : null
+                };
+
+                if (type === 'notice') {
+                    if (__current_socket_room && (msg.message.includes('has left the message group.') || msg.message.includes('has been disconnected.'))) {
+                        let user_id = msg.sender;
+                        if (__roomList?.[__current_socket_room]?.[user_id]) {
+                            __roomList[__current_socket_room][user_id] = __roomList[__current_socket_room][user_id].filter(v => v !== msg.sender_cid);
                         }
-                        catch (e) {
+
+                        if (__roomList?.[__current_socket_room]?.[user_id] && __roomList[__current_socket_room][user_id].length === 0) {
+                            delete __roomList[__current_socket_room][user_id];
                         }
-                    }
 
-                    else if (data?.['#sdpBroadcast']) {
-                        type = 'sdpBroadcast';
-                        sdp = data['#sdpBroadcast'];
-                        try {
-                            sdp = JSON.parse(sdp);
-                        }
-                        catch (e) {
-                        }
-                    }
-
-                    let msg: {
-                        type: 'message' | 'error' | 'success' | 'close' | 'notice' | 'private' | 'sdpOffer' | 'sdpBroadcast';
-                        message: any;
-                        sender?: string;
-                        sender_cid?: string;
-                    } = { type, message: type === 'sdpOffer' || type === 'sdpBroadcast' ? sdp : (data?.['#message'] || data?.['#private'] || data?.['#notice']) || null };
-
-                    if (data?.['#user_id']) {
-                        msg.sender = data['#user_id'];
-                    }
-
-                    if (data?.['#scid']) {
-                        msg.sender_cid = 'scid:' + data['#scid'];
-                    }
-
-                    if (type === 'notice') {
-                        if (this.__socket_room && (msg.message.includes('has left the message group.') || msg.message.includes('has been disconnected.'))) {
-                            if (__roomPending[this.__socket_room]) {
-                                await __roomPending[this.__socket_room];
-                            }
-
-                            let user_id = msg.sender;
-                            if (__roomList?.[this.__socket_room]?.[user_id]) {
-                                __roomList[this.__socket_room][user_id] = __roomList[this.__socket_room][user_id].filter(v => v !== msg.sender_cid);
-                            }
-
-                            if (__roomList?.[this.__socket_room]?.[user_id] && __roomList[this.__socket_room][user_id].length === 0) {
-                                delete __roomList[this.__socket_room][user_id];
-                            }
-
-                            if (__roomList?.[this.__socket_room]?.[user_id]) {
-                                return
-                            }
-                        }
-                        else if (this.__socket_room && msg.message.includes('has joined the message group.')) {
-                            if (__roomPending[this.__socket_room]) {
-                                await __roomPending[this.__socket_room];
-                            }
-
-                            let user_id = msg.sender;
-                            if (!__roomList?.[this.__socket_room]) {
-                                __roomList[this.__socket_room] = {};
-                            }
-                            if (!__roomList[this.__socket_room][user_id]) {
-                                __roomList[this.__socket_room][user_id] = [msg.sender_cid];
-                            }
-                            else {
-                                if (!__roomList[this.__socket_room][user_id].includes(msg.sender_cid)) {
-                                    __roomList[this.__socket_room][user_id].push(msg.sender_cid);
-                                }
-                                return;
-                            }
+                        if (__roomList?.[__current_socket_room]?.[user_id]) {
+                            return
                         }
                     }
-
+                    else if (__current_socket_room && msg.message.includes('has joined the message group.')) {
+                        let user_id = msg.sender;
+                        if (!__roomList?.[__current_socket_room]) {
+                            __roomList[__current_socket_room] = {};
+                        }
+                        if (!__roomList[__current_socket_room][user_id]) {
+                            __roomList[__current_socket_room][user_id] = [msg.sender_cid];
+                        }
+                        else {
+                            if (!__roomList[__current_socket_room][user_id].includes(msg.sender_cid)) {
+                                __roomList[__current_socket_room][user_id].push(msg.sender_cid);
+                            }
+                            return;
+                        }
+                    }
                     cb(msg);
-                };
+                }
+                else if (type === 'rtc') {
+                    // rtc signaling
+                    if (msg.sender !== this.user.user_id) {
+                        let rtc = msg.message;
+                        if (rtc.hungup) {
+                            // otherside has hung up the call
+                            if (__caller_ringing[msg.sender_cid]) {
+                                __caller_ringing[msg.sender_cid](false);
+                                delete __caller_ringing[msg.sender_cid];
+                            }
+                            if (__receiver_ringing[msg.sender_cid]) {
+                                delete __receiver_ringing[msg.sender_cid];
+                            }
+                            if (__peerConnection?.[msg.sender_cid]) {
+                                closeRTC.bind(this)({ cid: msg.sender_cid });
+                            }
+                            msg.type = 'rtc:closed';
+                            cb(msg);
+                            return;
+                        }
+                        if (rtc.candidate) {
+                            receiveIceCandidate.bind(this)(rtc.candidate, msg.sender_cid);
+                        }
+                        if (rtc.sdpoffer) {
+                            answerSdpOffer.bind(this)(rtc.sdpoffer, msg.sender_cid);
+                            if (!__receiver_ringing[msg.sender_cid]) {
+                                __receiver_ringing[msg.sender_cid] = msg.sender_cid;
+                                delete msg.message;
 
-                socket.onclose = event => {
-                    if (event.wasClean) {
-                        // remove keep alive
-                        clearInterval(__keepAliveInterval);
-                        __keepAliveInterval = null;
+                                msg.connectRTC = respondRTC.bind(this)(msg);
+                                msg.type = 'rtc:incoming';
+                                msg.hangup = (() => {
+                                    if (__peerConnection[msg.sender_cid]) {
+                                        closeRTC.bind(this)({ cid: msg.sender_cid });
+                                    }
+                                    else if (__receiver_ringing[msg.sender_cid]) {
+                                        delete __receiver_ringing[msg.sender_cid];
+                                        socket.send(JSON.stringify({
+                                            action: 'rtc',
+                                            uid: msg.sender_cid,
+                                            content: { hungup: this.user.user_id },
+                                            token: this.session.accessToken.jwtToken
+                                        }));
+                                    }
+                                }).bind(this);
 
-                        cb({ type: 'close', message: 'WebSocket connection closed.' });
-                        this.__socket = null;
-                        this.__socket_room = null;
-                    }
-                    else {
-                        // close event was unexpected
-                        const maxAttempts = 10;
-                        reconnectAttempts++;
-
-                        if (reconnectAttempts < maxAttempts) {
-                            let delay = Math.min(1000 * (2 ** reconnectAttempts), 30000); // max delay is 30 seconds
-                            cb({ type: 'error', message: `Skapi: WebSocket connection error. Reconnecting in ${delay / 1000} seconds...` });
-                            connectRealtime.bind(this)(cb, delay);
-                        } else {
-                            // Handle max reconnection attempts reached
-                            cb({ type: 'error', message: 'Skapi: WebSocket connection error. Max reconnection attempts reached.' });
-                            this.__socket = null;
+                                cb(msg);
+                            }
+                        }
+                        if (rtc.pickup) {
+                            // receiver has answered the call
+                            if (__caller_ringing[msg.sender_cid]) {
+                                __caller_ringing[msg.sender_cid](true);
+                                delete __caller_ringing[msg.sender_cid];
+                            }
+                        }
+                        if (rtc.sdpanswer) {
+                            if (__peerConnection[msg.sender_cid]) {
+                                // receive answer from the receiver
+                                if (__peerConnection[msg.sender_cid].signalingState === 'have-local-offer') {
+                                    await __peerConnection[msg.sender_cid].setRemoteDescription(new RTCSessionDescription(rtc.sdpanswer));
+                                }
+                                else {
+                                    throw new SkapiError(`Invalid signaling state.`, { code: 'INVALID_REQUEST' });
+                                }
+                            }
                         }
                     }
-                };
+                }
+                else {
+                    cb(msg);
+                }
+            };
 
-                socket.onerror = () => {
-                    cb({ type: 'error', message: 'Skapi: WebSocket connection error.' });
-                    throw new SkapiError(`Skapi: WebSocket connection error.`, { code: 'ERROR' });
-                };
-            }, delay);
-        });
-    }
+            socket.onclose = event => {
+                if (event.wasClean) {
+                    this.log('realtime onclose', 'WebSocket connection closed.');
+                    cb({ type: 'close', message: 'WebSocket connection closed.' });
+                    closeRealtime.bind(this)();
+                }
+                else {
+                    // Handle max reconnection attempts reached
+                    this.log('realtime onclose', 'WebSocket connection error. Max reconnection attempts reached.');
+                    cb({ type: 'error', message: 'Skapi: WebSocket unexpected close.' });
+                    closeRealtime.bind(this)();
+                }
+            };
 
-    return this.__socket;
+            socket.onerror = () => {
+                this.log('realtime onerror', 'WebSocket connection error.');
+                cb({ type: 'error', message: 'Skapi: WebSocket connection error.' });
+            };
+        }, delay);
+    });
 }
 
 export async function closeRealtime(): Promise<void> {
     let socket: WebSocket = this.__socket ? await this.__socket : this.__socket;
-
-    if (socket) {
-        socket.close();
+    closeRTC.bind(this)({ close_all: true });
+    if (__keepAliveInterval) {
+        clearInterval(__keepAliveInterval);
+        __keepAliveInterval = null;
     }
 
+    try {
+        if (socket) {
+            socket.close();
+        }
+    }
+    catch (e) { }
+
     this.__socket = null;
-    this.__socket_room = null;
+    __current_socket_room = null;
 
     return null;
 }
@@ -250,7 +280,7 @@ export async function postRealtime(message: any, recipient: string): Promise<{ t
             }));
 
         } catch (err) {
-            if (this.__socket_room !== recipient) {
+            if (__current_socket_room !== recipient) {
                 throw new SkapiError(`User has not joined to the recipient group. Run joinRealtime({ group: "${recipient}" })`, { code: 'INVALID_REQUEST' });
             }
 
@@ -268,118 +298,6 @@ export async function postRealtime(message: any, recipient: string): Promise<{ t
     throw new SkapiError('Realtime connection is not open. Try reconnecting with connectRealtime().', { code: 'INVALID_REQUEST' });
 }
 
-export async function connectRTC(
-    params: {
-        recipient: string;
-        ice?: string;
-        callback?: {
-            onicecandidate?: (e: any) => void;
-            onnegotiationneeded?: (e: any) => void;
-            onerror?: (e: any) => void;
-        }
-    }
-): Promise<any> {
-    let socket: WebSocket = this.__socket ? await this.__socket : this.__socket;
-
-    if (!socket) {
-        throw new SkapiError(`No realtime connection. Execute connectRealtime() before this method.`, { code: 'INVALID_REQUEST' });
-    }
-
-    let { recipient, ice = "stun:stun.skapi.com:3468", callback = {} } = extractFormData(params).data;
-
-    if (!recipient) {
-        throw new SkapiError(`No recipient.`, { code: 'INVALID_REQUEST' });
-    }
-
-    if (socket.readyState === 1) {
-        // Call STUN server to get IP address
-        const configuration = {
-            iceServers: [
-                { urls: ice }
-            ]
-        };
-
-        if (this.peerConnection) {
-            throw new SkapiError(`P2P connection is already in use.`, { code: 'INVALID_REQUEST' });
-        }
-
-        this.peerConnection = new RTCPeerConnection(configuration);
-
-        // Collect ICE candidates and send them to the remote peer
-        this.peerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                // Send the candidate to the remote peer through your signaling server
-                if (typeof callback?.onicecandidate === 'function') {
-                    callback.onicecandidate(event);
-                }
-                this.log('candidate', event.candidate);
-            } else {
-                // All ICE candidates have been sent
-                this.log('candidate-end', 'All ICE candidates have been sent');
-            }
-        };
-
-        // Create a data channel
-        const dataChannel = this.peerConnection.createDataChannel(Math.random().toString(36).substring(2, 15), {
-            ordered: true, // Ensure messages are received in order
-            maxRetransmits: 10 // Maximum number of retransmissions
-        });
-
-        // Listen for negotiationneeded event
-        this.peerConnection.onnegotiationneeded = async () => {
-            try {
-                const offer = await this.peerConnection.createOffer();
-                await this.peerConnection.setLocalDescription(offer);
-
-                this.__sdpoffer = this.peerConnection.localDescription;
-                this.log('sdpoffer', this.__sdpoffer);
-
-                try {
-                    validator.UserId(recipient);
-                    socket.send(JSON.stringify({
-                        action: 'sdpOffer',
-                        uid: recipient,
-                        content: JSON.stringify(this.__sdpoffer),
-                        token: this.session.accessToken.jwtToken
-                    }));
-
-                } catch (err) {
-                    if (this.__socket_room !== recipient) {
-                        throw new SkapiError(`User has not joined to the recipient group. Run joinRealtime({ group: "${recipient}" })`, { code: 'INVALID_REQUEST' });
-                    }
-
-                    socket.send(JSON.stringify({
-                        action: 'sdpBroadcast',
-                        rid: recipient,
-                        content: JSON.stringify(this.__sdpoffer),
-                        token: this.session.accessToken.jwtToken
-                    }));
-                }
-
-                if (typeof callback?.onnegotiationneeded === 'function') {
-                    callback.onnegotiationneeded(this.__sdpoffer);
-                }
-            } catch (error) {
-                this.log('Error during renegotiation:', error);
-
-                if (typeof callback?.onerror === 'function') {
-                    callback.onerror(error);
-                }
-                else {
-                    throw error;
-                }
-            }
-        };
-
-        return new Promise(res => {
-            dataChannel.onopen = () => {
-                this.log('Data channel is open');
-                res(dataChannel);
-            }
-        });
-    }
-};
-
 export async function joinRealtime(params: { group?: string | null }): Promise<{ type: 'success', message: string }> {
     let socket: WebSocket = this.__socket ? await this.__socket : this.__socket;
 
@@ -391,7 +309,7 @@ export async function joinRealtime(params: { group?: string | null }): Promise<{
 
     let { group = null } = params;
 
-    if (!group && !this.__socket_room) {
+    if (!group && !__current_socket_room) {
         return { type: 'success', message: 'Left realtime message group.' }
     }
 
@@ -405,34 +323,26 @@ export async function joinRealtime(params: { group?: string | null }): Promise<{
         token: this.session.accessToken.jwtToken
     }));
 
-    this.__socket_room = group;
+    __current_socket_room = group;
 
     return { type: 'success', message: group ? `Joined realtime message group: "${group}".` : 'Left realtime message group.' }
 }
 
-export async function getRealtimeUsers(params: { group: string, user_id?: string }, fetchOptions?: FetchOptions): Promise<DatabaseResponse<{ user_id: string; connection_id: string }[]>> {
-    await this.__connection;
-
+export async function getRealtimeUsers(params: { group: string, user_id?: string }, fetchOptions?: FetchOptions): Promise<DatabaseResponse<{ user_id: string; cid: string }[]>> {
     params = validator.Params(
         params,
         {
             user_id: (v: string) => validator.UserId(v, 'User ID in "user_id"'),
-            group: 'string'
-        },
-        ['group']
+            group: ['string', () => {
+                if (!__current_socket_room) {
+                    throw new SkapiError(`No group has been joined. Otherwise "group" is required.`, { code: 'INVALID_REQUEST' });
+                }
+                return __current_socket_room;
+            }]
+        }
     );
 
-    if (!params.group) {
-        throw new SkapiError(`"group" is required.`, { code: 'INVALID_PARAMETER' });
-    }
-
-    if (!params.user_id) {
-        if (__roomPending[params.group]) {
-            return __roomPending[params.group];
-        }
-    }
-
-    let req = request.bind(this)(
+    let res = await request.bind(this)(
         'get-ws-group',
         params,
         {
@@ -440,40 +350,29 @@ export async function getRealtimeUsers(params: { group: string, user_id?: string
             auth: true,
             method: 'post'
         }
-    ).then(res => {
-        res.list = res.list.map((v: any) => {
-            let user_id = v.uid.split('#')[1];
+    );
 
-            if (!params.user_id) {
-                if (!__roomList[params.group]) {
-                    __roomList[params.group] = {};
-                }
-                if (!__roomList[params.group][user_id]) {
-                    __roomList[params.group][user_id] = [v.cid];
-                }
-                else if (!__roomList[params.group][user_id].includes(v.cid)) {
-                    __roomList[params.group][user_id].push(v.cid);
-                }
+    res.list = res.list.map((v: any) => {
+        let user_id = v.uid.split('#')[1];
+        if (!params.user_id) {
+            if (!__roomList[params.group]) {
+                __roomList[params.group] = {};
             }
-
-            return {
-                user_id,
-                connection_id: v.cid
+            if (!__roomList[params.group][user_id]) {
+                __roomList[params.group][user_id] = [v.cid];
             }
-        });
+            else if (!__roomList[params.group][user_id].includes(v.cid)) {
+                __roomList[params.group][user_id].push(v.cid);
+            }
+        }
 
-        return res;
-    }).finally(() => {
-        delete __roomPending[params.group];
+        return {
+            user_id,
+            cid: v.cid
+        }
     });
 
-    if (!params.user_id) {
-        if (!__roomPending[params.group]) {
-            __roomPending[params.group] = req;
-        }
-    }
-
-    return req;
+    return res;
 }
 
 export async function getRealtimeGroups(

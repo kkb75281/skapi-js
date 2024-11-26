@@ -1,6 +1,56 @@
 export type Condition = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne' | '>' | '>=' | '<' | '<=' | '=' | '!=';
 
+export type RTCCallback = (e: {
+    type: string;
+    [key: string]: any;
+}) => void
+
+export type RTCReceiverParams = {
+    ice?: string;
+    media?: {
+        video: boolean;
+        audio: boolean;
+    } | MediaStream;
+}
+
+export type RTCConnectorParams = {
+    cid: string;
+    ice?: string;
+    media?: {
+        video: boolean;
+        audio: boolean;
+    } | MediaStream;
+    channels?: Array<RTCDataChannelInit | 'text-chat' | 'file-transfer' | 'video-chat' | 'voice-chat' | 'gaming'>;
+}
+
+export type RTCConnector = {
+    hangup: () => void;
+    connection: Promise<RTCResolved>;
+}
+
+export type RTCResolved = {
+    target: RTCPeerConnection;
+    channels: {
+        [protocol: string]: RTCDataChannel
+    };
+    hangup: () => void;
+    media: MediaStream;
+}
+
+export type WebSocketMessage = {
+    type: 'message' | 'error' | 'success' | 'close' | 'notice' | 'private' | 'rtc' | 'reconnect' | 'rtc:incoming' | 'rtc:closed';
+    message?: any;
+    connectRTC?: (params: RTCReceiverParams, callback: RTCCallback) => Promise<RTCResolved>;
+    hangup?: () => void; // Reject incoming RTC connection.
+    sender?: string; // user_id of the sender
+    sender_cid?: string; // scid of the sender
+    sender_rid?: string; // group of the sender
+}
+
+export type RealtimeCallback = (rt: WebSocketMessage) => void;
+
 export type GetRecordQuery = {
+    unique_id?: string; // When unique_id is given, it will fetch the record with the given unique_id. Unique ID overrides record_id.
     record_id?: string;
 
     /** Table name not required when "record_id" is given. If string is given, "table.name" will be set with default settings. */
@@ -18,7 +68,14 @@ export type GetRecordQuery = {
         subscription?: string;
     } | string;
 
-    reference?: string; // Referenced record ID. If user ID is given, it will fetch records that are uploaded by the user.
+    reference?: string | {
+        /** Referenced record ID. If user ID is given, it will fetch records that are uploaded by the user. */
+        record_id?: string;
+        /** Referenced record unique ID. */
+        unique_id?: string;
+        /** User id */
+        user_id?: string;
+    }; // Referenced record ID. If user ID is given, it will fetch records that are uploaded by the user.
 
     /** Index condition and range cannot be used simultaneously.*/
     index?: {
@@ -31,7 +88,9 @@ export type GetRecordQuery = {
     };
     tag?: string;
 }
+
 export type DelRecordQuery = {
+    unique_id?: string | string[]; // When unique_id is given, it will update the record with the given unique_id. If unique_id is not given, it will create a new record. Unique ID overrides record_id.
     record_id?: string | string[];
 
     /** Table name not required when "record_id" is given. If string is given, "table.name" will be set with default settings. */
@@ -59,7 +118,7 @@ export type DelRecordQuery = {
 
 export type PostRecordConfig = {
     record_id?: string; // when record_id is given, it will update the record with the given record_id. If record_id is not given, it will create a new record.
-
+    unique_id?: string; // You can set unique_id to the record with the given unique_id.
     readonly?: boolean; // When true, record cannot be updated or deleted.
 
     /** Table name not required when "record_id" is given. If string is given, "table.name" will be set with default settings. */
@@ -75,6 +134,7 @@ export type PostRecordConfig = {
 
     /** If record ID string is given, "reference.record_id" will be set with default parameters. */
     reference?: {
+        unique_id?: string; // null removes reference. When unique_id is given, it will override record_id.
         record_id?: string; // null removes reference
         reference_limit?: number | null; // Default: null (Infinite)
         allow_multiple_reference?: boolean; // Default: true
@@ -106,6 +166,7 @@ export type BinaryFile = {
 
 export type RecordData = {
     service: string;
+    unique_id?: string;
     record_id: string;
     /** Uploader's user ID. */
     user_id: string;
@@ -158,9 +219,9 @@ export type Connection = {
     service_name: string;
     /** Service options */
     opt: {
-        freeze_database:boolean;
-        prevent_inquiry:boolean;
-        prevent_signup:boolean;
+        freeze_database: boolean;
+        prevent_inquiry: boolean;
+        prevent_signup: boolean;
     }
 };
 
