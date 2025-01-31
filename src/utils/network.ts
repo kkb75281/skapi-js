@@ -3,7 +3,8 @@ import SkapiError from '../main/error';
 import { Form, FetchOptions, DatabaseResponse, ProgressCallback } from '../Types';
 import validator from './validator';
 import { MD5, generateRandom, extractFormData } from './utils';
-import { authentication } from '../methods/user';
+// import { authentication, getJwtToken } from '../methods/user';
+import { getJwtToken } from '../methods/user';
 
 async function getEndpoint(dest: string, auth: boolean) {
     const endpoints = await Promise.all([
@@ -43,7 +44,6 @@ async function getEndpoint(dest: string, auth: boolean) {
         case 'send-inquiry':
         case 'client-secret-request-public':
         case 'block-account':
-        case 'invitation-list':
         case 'grant-access':
             return (auth ? admin.admin_private : admin.admin_public) + dest + query;
 
@@ -61,6 +61,7 @@ async function getEndpoint(dest: string, auth: boolean) {
         case 'get-ws-group':
         case 'del-files':
         case 'check-schema':
+        case 'get-feed':
             return (auth ? record.record_private : record.record_public) + dest + query;
 
         default:
@@ -69,6 +70,7 @@ async function getEndpoint(dest: string, auth: boolean) {
 }
 
 const __pendingRequest: Record<string, Promise<any>> = {};
+
 
 export async function request(
     url: string,
@@ -85,6 +87,11 @@ export async function request(
         ignoreService: boolean;
     }
 ): Promise<any> {
+<<<<<<<<< Temporary merge branch 1
+    if (this.__network_logs) {
+        console.log(JSON.parse(JSON.stringify({ url, data, options })));
+    }
+=========
     this.log('request:', { url, data, options, _etc: _etc || {} });
 
     options = options || {};
@@ -112,6 +119,15 @@ export async function request(
 
     if (auth) {
         if (this.session) {
+<<<<<<<<< Temporary merge branch 1
+            let currTime = Date.now() / 1000;
+            if (this.session.idToken.payload.exp < currTime) {
+                try {
+                    await this.authentication().getSession({ refreshToken: true });
+                }
+                catch (err) {
+                    this.logout();
+=========
             this.log('request:session', this.session);
 
             let currTime = Math.floor(Date.now() / 1000);
@@ -131,15 +147,24 @@ export async function request(
                 }
                 catch (err) {
                     this.log('request:New token error', err);
+                    await this.logout();
+>>>>>>>>> Temporary merge branch 2
                     throw new SkapiError('User login is required.', { code: 'INVALID_REQUEST' });
                 }
             }
 
             token = this.session?.idToken?.jwtToken;
+<<<<<<<<< Temporary merge branch 1
+        }
+        else {
+            this.logout();
+=========
             this.log('request:token to use', token);
         }
         else {
             this.log('request:No session', null);
+            await this.logout();
+>>>>>>>>> Temporary merge branch 2
             throw new SkapiError('User login is required.', { code: 'INVALID_REQUEST' });
         }
     }
@@ -219,6 +244,8 @@ export async function request(
         hashedParams
     }); // returns requrestKey | cached data
 
+    this.log('requestKey', requestKey);
+
     if (!requestKey || requestKey && typeof requestKey === 'object') {
         // cahced data can be falsy data or object
         return requestKey;
@@ -226,6 +253,7 @@ export async function request(
 
     // prevent duplicate request
     if (typeof requestKey === 'string' && __pendingRequest[requestKey] instanceof Promise) {
+        this.log('request:returning pending', requestKey);
         return __pendingRequest[requestKey as string];
     }
 
@@ -284,7 +312,9 @@ export async function request(
 
     opt.method = method;
     let promise = _fetch.bind(this)(endpoint, opt, progress);
-    __pendingRequest[requestKey as string] = promise;
+    __pendingRequest[requestKey as string] = promise.finally(()=>{
+        delete __pendingRequest[requestKey as string];
+    });
 
     try {
         let result = update_startKey_keys.bind(this)({
@@ -297,6 +327,9 @@ export async function request(
         if (requestKey && __pendingRequest.hasOwnProperty(requestKey as string)) {
             delete __pendingRequest[requestKey as string];
         }
+<<<<<<<<< Temporary merge branch 1
+        
+=========
 
         this.log('request:end', result);
 
@@ -307,6 +340,9 @@ export async function request(
         if (requestKey && __pendingRequest.hasOwnProperty(requestKey as string)) {
             delete __pendingRequest[requestKey as string];
         }
+<<<<<<<<< Temporary merge branch 1
+        
+=========
         this.log('request:err', err);
         throw err;
     }
@@ -481,11 +517,12 @@ function _fetch(url: string, opt: any, progress?: ProgressCallback) {
 
                     else if (typeof result === 'object' && result?.message) {
                         let code = (result?.code || (status ? status.toString() : null) || 'ERROR');
-                        let msg = result.message;
-                        if (typeof msg === 'string') {
-                            msg = msg.trim();
+                        let message = result.message;
+                        let cause = result?.cause;
+                        if (typeof message === 'string') {
+                            message = message.trim();
                         }
-                        rej(new SkapiError(msg, { code: code }));
+                        rej(new SkapiError(message, { cause, code }));
                     }
 
                     else {
@@ -869,8 +906,8 @@ export function formHandler(options?: { preventMultipleCalls: boolean; }) {
 
 export async function getFormResponse(): Promise<any> {
     await this.__connection;
-    let responseKey = `${this.service}:${MD5.hash(location.href.split('?')[0])}`;
-    let stored = sessionStorage.getItem(responseKey);
+    let responseKey = `${this.service}:${MD5.hash(window.location.href.split('?')[0])}`;
+    let stored = window.sessionStorage.getItem(responseKey);
     if (stored !== null) {
         try {
             stored = JSON.parse(stored);

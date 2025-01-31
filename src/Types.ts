@@ -50,59 +50,24 @@ export type WebSocketMessage = {
 export type RealtimeCallback = (rt: WebSocketMessage) => void;
 
 export type GetRecordQuery = {
-    unique_id?: string; // When unique_id is given, it will fetch the record with the given unique_id. Unique ID overrides record_id.
-    record_id?: string;
+    unique_id?: string; // When unique_id is given, it will fetch the record with the given unique_id.
+    record_id?: string; // When record_id is given, it will fetch the record with the given record_id. This overrides all other parameters.
 
     /** Table name not required when "record_id" is given. If string is given, "table.name" will be set with default settings. */
-    table?: {
+    table?: string | {
         /** Not allowed: Special characters. Allowed: White space. periods.*/
         name: string;
         /** Number range: 0 ~ 99. Default: 'public' */
-        access_group?: number | 'private' | 'public' | 'authorized';
-        // subscription?: {
-        //     user_id: string;
-        //     /** Number range: 0 ~ 99 */
-        //     group: number;
-        // };
+        access_group?: number | 'private' | 'public' | 'authorized' | 'admin';
         /** User ID of subscription */
-        subscription?: string;
-    } | string;
-
-    reference?: string | {
-        /** Referenced record ID. If user ID is given, it will fetch records that are uploaded by the user. */
-        record_id?: string;
-        /** Referenced record unique ID. */
-        unique_id?: string;
-        /** User id */
-        user_id?: string;
-    }; // Referenced record ID. If user ID is given, it will fetch records that are uploaded by the user.
-
-    /** Index condition and range cannot be used simultaneously.*/
-    index?: {
-        /** Not allowed: White space, special characters. Allowed: Periods. */
-        name: string | '$updated' | '$uploaded' | '$referenced_count' | '$user_id';
-        /** Not allowed: Periods, special characters. Allowed: White space. */
-        value: string | number | boolean;
-        condition?: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne' | '>' | '>=' | '<' | '<=' | '=' | '!=';
-        range?: string | number | boolean;
+        subscription?: string | {
+            user_id: string;
+            /** Number range: 0 ~ 99 */
+            group: number;
+        };
     };
-    tag?: string;
-}
 
-export type DelRecordQuery = {
-    unique_id?: string | string[]; // When unique_id is given, it will update the record with the given unique_id. If unique_id is not given, it will create a new record. Unique ID overrides record_id.
-    record_id?: string | string[];
-
-    /** Table name not required when "record_id" is given. If string is given, "table.name" will be set with default settings. */
-    table?: {
-        /** Not allowed: Special characters. Allowed: White space. periods.*/
-        name: string;
-        /** Number range: 0 ~ 99. Default: 'public' */
-        access_group?: number | 'private' | 'public' | 'authorized';
-        subscription?: boolean;
-    } | string;
-
-    reference?: string; // Referenced record ID. If user ID is given, it will fetch records that are uploaded by the user.
+    reference?: string // Referenced record ID or unique ID. If user ID is given, it will fetch records that are uploaded by the user.
 
     /** Index condition and range cannot be used simultaneously.*/
     index?: {
@@ -126,20 +91,35 @@ export type PostRecordConfig = {
         /** Not allowed: Special characters. Allowed: White space. periods.*/
         name?: string;
         /** Number range: 0 ~ 99. Default: 'public' */
-        access_group?: number | 'private' | 'public' | 'authorized';
-        // subscription_group?: number;
+        access_group?: number | 'private' | 'public' | 'authorized' | 'admin';
+
         /** When true, Record will be only accessible for subscribed users. */
-        subscription?: boolean;
+        subscription?: {
+            group: number; // subscription group. default 1.
+            exclude_from_feed?: boolean; // When true, record will be excluded from the subscribers feed.
+            notify_subscribers?: boolean; // When true, subscribers will receive notification when the record is uploaded.
+            feedback_referencing_records?: boolean; // When true, and if this is a record in subscription table, records referencing this record will be included to the subscribers feed of the owner of the record.
+        };
     };
 
-    /** If record ID string is given, "reference.record_id" will be set with default parameters. */
-    reference?: {
-        unique_id?: string; // null removes reference. When unique_id is given, it will override record_id.
-        record_id?: string; // null removes reference
-        reference_limit?: number | null; // Default: null (Infinite)
-        allow_multiple_reference?: boolean; // Default: true
-        can_remove_reference?: boolean; // Default: false. When true, owner of the record can remove any record that are referencing this record and when deleted, all the record referencing this record will be deleted.
-    } | string;
+    source?: {
+        allow_referencing_to_feed?: boolean; // When true, and if this is a record is referencing a record in subscription table, it will be included to the reference record owners feed.
+        referencing_limit?: number; // Default: null (Infinite)
+        prevent_multiple_referencing?: boolean; // If true, a single user can reference this record only once.
+        can_remove_referencing_records?: boolean; // When true, owner of the record can remove any record that are referencing this record. Also when this record is deleted, all the record referencing this record will be deleted.
+        only_granted_can_reference?: boolean; // When true, only the user who has granted private access to the record can reference this record.
+        referencing_index_restrictions?: {
+            /** Not allowed: White space, special characters. Allowed: Alphanumeric, Periods. */
+            name: string; // Allowed index name
+            /** Not allowed: Periods, special characters. Allowed: Alphanumeric, White space. */
+            value?: string | number | boolean; // Allowed index value
+            range?: string | number | boolean; // Allowed index range
+            condition?: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne' | '>' | '>=' | '<' | '<=' | '=' | '!='; // Allowed index value condition
+        }[]
+    };
+
+    /** Can be record ID or unique ID */
+    reference?: string;
 
     /** null removes index */
     index?: {
@@ -149,10 +129,15 @@ export type PostRecordConfig = {
         value: string | number | boolean;
     } | null;
 
-    tags?: string[];
-
-    remove_bin?: BinaryFile[] | string[]; // Removes bin data from the record.
+    tags?: string[] | null; // null removes all tags
+    remove_bin?: BinaryFile[] | string[] | null; // Removes bin data from the record. When null, it will remove all bin data.
+    progress?: ProgressCallback; // Callback for database request progress. Useful when building progress bar.
 }
+
+export type DelRecordQuery = {
+    unique_id?: string | string[];
+    record_id?: string | string[];
+} & GetRecordQuery;
 
 export type BinaryFile = {
     access_group: number | 'private' | 'public' | 'authorized';
@@ -165,36 +150,50 @@ export type BinaryFile = {
 }
 
 export type RecordData = {
-    service: string;
-    unique_id?: string;
     record_id: string;
-    /** Uploader's user ID. */
+    unique_id?: string;
     user_id: string;
     updated: number;
     uploaded: number;
+    referenced_count: number;
+
     table: {
         name: string;
         /** Number range: 0 ~ 99 */
-        access_group: 'private' | 'public' | 'authorized' | number;
-        subscription: boolean;
-    },
-    reference: {
-        record_id?: string;
-        reference_limit: number;
-        allow_multiple_reference: boolean;
-        referenced_count: number;
-        can_remove_reference: boolean;
-    },
+        access_group: number | 'private' | 'public' | 'authorized' | 'admin';
+        /** User ID of subscription */
+        subscription?: {
+            user_id: string;
+            /** Number range: 0 ~ 99 */
+            group: number;
+        };
+    };
+    source: {
+        referencing_limit: number; // Default: null (Infinite)
+        prevent_multiple_referencing: boolean; // If true, a single user can reference this record only once.
+        can_remove_referencing_records: boolean; // When true, owner of the record can remove any record that are referencing this record. Also when this record is deleted, all the record referencing this record will be deleted.
+        exclude_referencing_from_subscription_feed: boolean; // If this record requires subscription and if this option is set to true, referencing records will be excluded from the subscription feed.
+        only_granted_can_reference: boolean; // When true, only the user who has granted private access to the record can reference this record.
+        referencing_index_restrictions?: {
+            /** Not allowed: White space, special characters. Allowed: Alphanumeric, Periods. */
+            name: string; // Allowed index name
+            /** Not allowed: Periods, special characters. Allowed: Alphanumeric, White space. */
+            value?: string | number | boolean; // Allowed index value
+            range?: string | number | boolean; // Allowed index range
+            condition?: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne' | '>' | '>=' | '<' | '<=' | '=' | '!='; // Allowed index value condition
+        }[]
+    };
+    reference?: string; // record id of the referenced record.
     index?: {
         name: string;
         value: string | number | boolean;
-    },
+    };
     data?: Record<string, any>;
     tags?: string[];
-    bin?: { [key: string]: BinaryFile | BinaryFile[] };
+    bin: { [key: string]: BinaryFile | BinaryFile[] };
     ip: string;
     readonly: boolean;
-};
+}
 
 export type Connection = {
     /** User's locale */
@@ -223,7 +222,7 @@ export type Connection = {
         prevent_inquiry: boolean;
         prevent_signup: boolean;
     }
-};
+}
 
 export type Form<T> = HTMLFormElement | FormData | SubmitEvent | T;
 
@@ -247,7 +246,7 @@ export type Newsletters = {
      * Url of the message html.
      */
     url: string;
-};
+}
 
 export type UserProfilePublicSettings = {
     /** User's E-Mail is public when true. E-Mail should be verified. */
@@ -312,7 +311,7 @@ export type UserAttributes = {
     profile?: string;
     website?: string;
     nickname?: string;
-};
+}
 
 export type UserProfile = {
     /** Service id of the user account. */
@@ -374,14 +373,14 @@ export type FetchOptions = {
     startKey?: { [key: string]: any; };
     /** Callback for database request progress. Useful when building progress bar. */
     progress?: ProgressCallback;
-};
+}
 
 export type DatabaseResponse<T> = {
     list: T[];
     startKey: string;
     endOfList: boolean;
     startKeyHistory: string[];
-};
+}
 
 export type Service = {
     /** Shows active state. 1 = active, 0 = disabled */
@@ -437,7 +436,7 @@ export type Service = {
     };
     /** Number of users in the service. */
     users: number;
-};
+}
 
 export type FileInfo = {
     url: string;

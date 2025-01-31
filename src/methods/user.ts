@@ -15,7 +15,7 @@ import {
 } from '../Types';
 import validator from '../utils/validator';
 import { request } from '../utils/network';
-import { MD5, fromBase62, parseUserAttributes } from '../utils/utils';
+import { MD5, extractFormData, fromBase62, parseUserAttributes } from '../utils/utils';
 
 let cognitoUser: CognitoUser | null = null;
 
@@ -64,7 +64,7 @@ export async function consumeTicket(params: { ticket_id: string; } & { [key: str
     let ticket_id = params.ticket_id;
 
     await this.__connection;
-    let resp = await request.bind(this)(`https://${this.service.slice(0, 4)}.skapi.dev/auth/consume/${this.service}/${this.owner}/${ticket_id}`, params, { auth: true });
+    let resp = await request.bind(this)(`https://${this.service.slice(0, 4)}.${this.customApiDomain}/auth/consume/${this.service}/${this.owner}/${ticket_id}`, params, { auth: true });
     return map_ticket_obj(resp);
 }
 
@@ -168,24 +168,91 @@ export async function unregisterTicket(
     return request.bind(this)('register-ticket', Object.assign({ exec: 'unreg' }, params), { auth: true });
 }
 
+export async function getJwtToken() {
+    await this.__connection;
+    if (this.session) {
+        const currentTime = Math.floor(Date.now() / 1000);
+        const idToken = this.session.getIdToken();
+        const idTokenExp = idToken.getExpiration();
+        this.log('request:tokens', {
+            exp: this.session.idToken.payload.exp,
+            currentTime,
+            expiresIn: idTokenExp - currentTime,
+            token: this.session.accessToken.jwtToken,
+            refreshToken: this.session.refreshToken.token
+        });
+
+        if (idTokenExp < currentTime) {
+            this.log('request:requesting new token', null);
+            try {
+                await authentication.bind(this)().getSession({ refreshToken: true });
+                this.log('request:received new tokens', {
+                    exp: this.session.idToken.payload.exp,
+                    currentTime,
+                    expiresIn: idTokenExp - currentTime,
+                    token: this.session.accessToken.jwtToken,
+                    refreshToken: this.session.refreshToken.token
+                });
+            }
+            catch (err) {
+                this.log('request:new token error', err);
+                throw new SkapiError('User login is required.', { code: 'INVALID_REQUEST' });
+            }
+        }
+
+        return this.session?.idToken?.jwtToken;
+    }
+    else {
+        this.log('request:no session', null);
+        _out.bind(this)();
+        throw new SkapiError('User login is required.', { code: 'INVALID_REQUEST' });
+    }
+}
+
+
+let isRefreshing = null;
+function refreshSession(session, cognitoUser) {
+    if (isRefreshing instanceof Promise) {
+        return isRefreshing;
+    }
+
+    return new Promise((res, rej) => {
+        cognitoUser.refreshSession(session.getRefreshToken(), (refreshErr, refreshedSession) => {
+            this.log('getSession:refreshSessionCallback', { refreshErr, refreshedSession });
+
+            if (refreshErr) {
+                _out.bind(this)();
+                rej(refreshErr);
+            }
+            else if (refreshedSession.isValid()) {
+                res(refreshedSession);
+            }
+            else {
+                _out.bind(this)();
+                rej(new SkapiError('Invalid session.', { code: 'INVALID_REQUEST' }));
+            }
+        });
+    });
+}
+
 export function authentication() {
     if (!this.userPool) throw new SkapiError('User pool is missing', { code: 'INVALID_REQUEST' });
 
     const getUserProfile = (): UserProfile => {
         // get users updated attribute
         let attr = cognitoUser.getSignInUserSession().getIdToken().payload || null;
-        this.log('attributes to normalize:', attr);
 
         // parse attribute structure: [ { Name, Value }, ... ]
         let user = parseUserAttributes(attr);
+        this.log('normalized user attribute', user);
         this.__user = user;
         return user;
     };
 
-
-    const getSession = async (option?: { refreshToken?: boolean; _holdLogin?: boolean }): Promise<CognitoUserSession | Function> => {
+    const getSession = (option?: { skipEventTrigger?: boolean; refreshToken?: boolean; _holdLogin?: boolean }): Promise<CognitoUserSession | Function> => {
         // fetch session, updates user attributes
-        let { refreshToken = false } = option || {};
+        this.log('getSession:option', option);
+        let { refreshToken = false, skipEventTrigger = false } = option || {};
 
         return new Promise((res, rej) => {
             cognitoUser = this.userPool.getCurrentUser();
@@ -200,18 +267,6 @@ export function authentication() {
 
             cognitoUser.getSession((err: any, session: CognitoUserSession) => {
                 this.log('getSession:getSessionCallback', { err, session });
-
-                if (err) {
-                    _out.bind(this)();
-                    rej(err);
-                    return;
-                }
-
-                if (!session) {
-                    _out.bind(this)();
-                    rej(new SkapiError('Current session does not exist.', { code: 'INVALID_REQUEST' }));
-                    return;
-                }
 
                 let respond = async (s: CognitoUserSession) => {
                     let sessionAttribute = s.getIdToken().payload;
@@ -229,44 +284,63 @@ export function authentication() {
                         res(() => {
                             this.session = s;
                             getUserProfile();
-                            this._runOnLoginListeners(this.user);
+                            if (!skipEventTrigger) {
+                                this._runOnLoginListeners(this.user);
+                            }
                             return this.session;
                         });
                         return;
                     }
                     this.session = s;
                     getUserProfile();
-                    this._runOnLoginListeners(this.user);
+                    if (!skipEventTrigger) {
+                        this._runOnLoginListeners(this.user);
+                    }
                     res(this.session);
                 }
 
-                // try refresh when invalid token
-                if (refreshToken || !session.isValid()) {
-                    cognitoUser.refreshSession(session.getRefreshToken(), async (refreshErr, refreshedSession) => {
-                        this.log('getSession:refreshSessionCallback:', { err, refreshedSession });
+                if (!session) {
+                    _out.bind(this)();
+                    rej(new SkapiError('Current session does not exist.', { code: 'INVALID_REQUEST' }));
+                    return;
+                }
 
-                        if (refreshErr) {
-                            _out.bind(this)();
-                            rej(refreshErr);
-                        }
-                        else if (refreshedSession.isValid()) {
-                            respond(refreshedSession);
-                        }
-                        else {
-                            _out.bind(this)();
-                            rej(new SkapiError('Invalid session.', { code: 'INVALID_REQUEST' }));
-                        }
+                if (err) {
+                    refreshSession.bind(this)(session, cognitoUser).then(refreshedSession => respond(refreshedSession)).catch(err => {
+                        _out.bind(this)();
+                        rej(err);
+                    }).finally(() => {
+                        isRefreshing = null;
+                    });
+
+                    return;
+                }
+
+                const currentTime = Math.floor(Date.now() / 1000);
+                const idToken = session.getIdToken();
+                const idTokenExp = idToken.getExpiration();
+                const isExpired = idTokenExp < currentTime;
+                this.log('getSession:currentTime', currentTime);
+                this.log('getSession:idTokenExp', idTokenExp);
+                this.log('getSession:isExpired', isExpired);
+                // try refresh when invalid token
+                if (isExpired || refreshToken || !session.isValid()) {
+                    refreshSession.bind(this)(session, cognitoUser).then(refreshedSession => respond(refreshedSession)).catch(err => {
+                        _out.bind(this)();
+                        rej(err);
+                    }).finally(() => {
+                        isRefreshing = null;
                     });
                 }
                 else {
-                    respond(session);
+                    respond(session).catch(err => rej(err));
                 }
             });
         });
     };
 
-    const createCognitoUser = (un: string) => {
-        let username = un.includes(this.service + '-') ? un : this.service + '-' + MD5.hash(un);
+    const createCognitoUser = (un: string, raw?: boolean) => {
+        let username = raw ? un : un.includes(this.service + '-') ? un : this.service + '-' + MD5.hash(un);
 
         return {
             cognitoUser: new CognitoUser({
@@ -277,12 +351,12 @@ export function authentication() {
         };
     };
 
-    const authenticateUser = (email: string, password: string): Promise<UserProfile> => {
+    const authenticateUser = (email: string, password: string, raw: boolean = false): Promise<UserProfile> => {
         return new Promise((res, rej) => {
             this.__request_signup_confirmation = null;
             this.__disabledAccount = null;
 
-            let initUser = createCognitoUser(email);
+            let initUser = createCognitoUser(email, raw);
             let username = initUser.cognitoUsername;
             let authenticationDetails = new AuthenticationDetails({
                 Username: username,
@@ -387,11 +461,26 @@ export function authentication() {
 export async function getProfile(options?: { refreshToken: boolean; }): Promise<UserProfile | null> {
     await this.__authConnection;
     try {
-        await authentication.bind(this)().getSession(options);
+        await authentication.bind(this)().getSession(Object.assign({ skipEventTrigger: true }, options));
         return this.user;
     } catch (err) {
         return null;
     }
+}
+
+export async function openIdLogin(params: { token: string; id: string; }): Promise<{ userProfile: UserProfile; openid: { [attribute: string]: string } }> {
+    await this.__connection;
+    params = validator.Params(params, {
+        token: 'string',
+        id: 'string'
+    });
+
+    let oplog = await request.bind(this)("openid-logger", params);
+    let logger = oplog.logger.split('#');
+    let username = this.service + '-' + logger[0];
+    let password = logger[1];
+
+    return { userProfile: await authentication.bind(this)().authenticateUser(username, password, true), openid: oplog.openid };
 }
 
 export async function checkAdmin() {
@@ -432,24 +521,13 @@ export async function logout(): Promise<'SUCCESS: The user has been logged out.'
     return 'SUCCESS: The user has been logged out.';
 }
 
-export async function resendSignupConfirmation(
-    /** Redirect url on confirmation success. */
-    redirect: string
-): Promise<'SUCCESS: Signup confirmation E-Mail has been sent.'> {
+export async function resendSignupConfirmation(): Promise<'SUCCESS: Signup confirmation E-Mail has been sent.'> {
     if (!this.__request_signup_confirmation) {
         throw new SkapiError('Least one login attempt is required.', { code: 'INVALID_REQUEST' });
     }
 
-    if (redirect) {
-        redirect = validator.Url(redirect);
-    }
-    else {
-        redirect = undefined;
-    }
-
     let resend = await request.bind(this)("confirm-signup", {
         username: this.__request_signup_confirmation,
-        redirect
     });
 
     return resend; // 'SUCCESS: Signup confirmation E-Mail has been sent.'
@@ -533,7 +611,7 @@ export async function login(
         throw new SkapiError('Least one of "username" or "email" is required.', { code: 'INVALID_PARAMETER' });
     }
 
-    return authentication.bind(this)().authenticateUser(params.username || params.email, params.password);
+    return await authentication.bind(this)().authenticateUser(params.username || params.email, params.password);
 
     // INVALID_REQUEST: the account has been blacklisted.
     // NOT_EXISTS: the account does not exist.
@@ -1064,6 +1142,9 @@ export async function getUsers(
         range?: string | number | boolean;
     },
     fetchOptions?: FetchOptions): Promise<DatabaseResponse<PublicUser>> {
+
+    params = extractFormData(params).data as any;
+
     if (!params) {
         // set default value
         params = {
@@ -1084,15 +1165,12 @@ export async function getUsers(
     const searchForTypes = {
         'user_id': (v: string) => {
             if (Array.isArray(v)) {
-                for (let id of v) {
-                    validator.UserId(id);
-                }
-                return v;
+                return v.map(id => validator.UserId(id));
             }
             return validator.UserId(v)
         },
-        'email': (v: string) => validator.Email(v),
-        'phone_number': (v: string) => validator.PhoneNumber(v),
+        'email': 'string',
+        'phone_number': 'string',
         'locale': (v: string) => {
             if (typeof v !== 'string' || typeof v === 'string' && v.length > 5) {
                 throw new SkapiError('Value of "locale" should be a country code.', { code: 'INVALID_PARAMETER' });
@@ -1106,14 +1184,7 @@ export async function getUsers(
         'subscribers': 'number',
         'timestamp': 'number',
         'access_group': 'number',
-        'approved': (v: boolean) => {
-            if (v) {
-                return 'by_admin:approved';
-            }
-            else {
-                return 'by_admin:suspended';
-            }
-        }
+        'approved': 'string'
     };
 
     let required = ['searchFor', 'value'];

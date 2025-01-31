@@ -72,7 +72,8 @@ import {
     subscribeNewsletter,
     getNewsletters,
     unsubscribeNewsletter,
-    getNewsletterSubscription
+    getNewsletterSubscription,
+    getFeed
 } from '../methods/subscription';
 import {
     getProfile,
@@ -99,6 +100,7 @@ import {
     unregisterTicket,
     jwtLogin,
     _out,
+    openIdLogin,
 } from '../methods/user';
 import {
     extractFormData,
@@ -120,11 +122,13 @@ import {
 } from '../methods/admin';
 export default class Skapi {
     // current version
-    private __version = '1.0.188-beta.1';
+    private __version = '1.0.201';
     service: string;
     owner: string;
     session: Record<string, any> | null = null;
     connection: Connection | null = null;
+    private __iPosted: { [rec_id: string]: RecordData } = {};
+    private __my_unique_ids: { [rec_id: string]: string } = {};
     private userPool: CognitoUserPool | null = null;
     private __socket: Promise<WebSocket> | null = null;
     private __mediaStream: MediaStream = null;
@@ -132,6 +136,7 @@ export default class Skapi {
     private host = 'skapi';
     private hostDomain = 'skapi.com';
     private target_cdn = 'd3e9syvbtso631';
+    private customApiDomain = 'skapi.dev';
 
     // privates
     private __disabledAccount: string | null = null;
@@ -315,7 +320,7 @@ export default class Skapi {
             }
         }
 
-        if (options?.eventListener?.onLogin) {
+        if (options?.eventListener?.onLogin && typeof options.eventListener.onLogin === 'function') {
             this.onLogin = options.eventListener.onLogin;
         }
 
@@ -323,6 +328,8 @@ export default class Skapi {
 
         this.target_cdn = __etc?.target_cdn || this.target_cdn;
         this.hostDomain = __etc?.hostDomain || this.hostDomain;
+        this.customApiDomain = __etc?.customApiDomain || this.customApiDomain;
+
         this.__network_logs = !!__etc?.network_logs;
 
         const cdn_domain = `https://${this.target_cdn}.cloudfront.net`; // don't change this
@@ -390,13 +397,13 @@ export default class Skapi {
                     _holdLogin: true
                 });
 
-                let cognitoUser = this.userPool.getCurrentUser();
-                if (cognitoUser) {
-                    if (!restore?.connection && !autoLogin) {
-                        _out.bind(this)();
-                    }
-                    else {
-                        (fireWhenAutoLogin as Function)();
+                if (!restore?.connection && !autoLogin) {
+                    _out.bind(this)();
+                }
+                else {
+                    let logFire = (fireWhenAutoLogin as Function)();
+                    if (logFire instanceof Promise) {
+                        await logFire;
                     }
                 }
             }
@@ -407,6 +414,7 @@ export default class Skapi {
         // connects to server
         this.__connection = (async (): Promise<Connection> => {
             let connection: Promise<Connection> = null;
+            await this.record_endpoint;
 
             if (!restore?.connection) {
                 // await for first connection
@@ -491,7 +499,7 @@ export default class Skapi {
             }, { bypassAwaitConnection: true, method: 'get' });
         }
         catch (err: any) {
-            this.log('Connection fail', err);
+            this.log('connection fail', err);
             alert('Service is not available: ' + (err.message || err.toString()));
 
             this.connection = null;
@@ -517,11 +525,16 @@ export default class Skapi {
     private log(n: string, v: any) {
         if (this.__network_logs) {
             try {
-                console.log(`%c${n}`, 'color: blue;', JSON.parse(JSON.stringify(v)));
+                console.log(`%c${n}:`, 'color: blue;', JSON.parse(JSON.stringify(v)));
             } catch (err) {
-                console.log(`%c${n}`, 'color: blue;', v);
+                console.log(`%c${n}:`, 'color: blue;', v);
             }
         }
+    }
+
+    @formHandler()
+    getFeed(params: null, fetchOptions: FetchOptions): Promise<DatabaseResponse<RecordData>> {
+        return getFeed.bind(this)(params, fetchOptions);
     }
 
     @formHandler()
@@ -574,6 +587,11 @@ export default class Skapi {
     }
 
     @formHandler()
+    openIdLogin(params: { token: string; id: string; }): Promise<{ userProfile: UserProfile; openid: { [attribute: string]: string } }> {
+        return openIdLogin.bind(this)(params);
+    }
+
+    @formHandler()
     clientSecretRequest(params: {
         url: string;
         clientSecretName: string;
@@ -586,7 +604,7 @@ export default class Skapi {
     }
 
     @formHandler()
-    consumeTicket(params: { ticket_id: string; } & { [key: string]: any }): Promise<any> {
+    consumeTicket(params: { ticket_id: string;[key: string]: any; }): Promise<any> {
         return consumeTicket.bind(this)(params);
     }
 
@@ -636,7 +654,7 @@ export default class Skapi {
 
     @formHandler()
     inviteUser(
-        form: UserAttributes & UserProfilePublicSettings & { email: string; },
+        form: { email: string; openid_id: string; } & UserAttributes & UserProfilePublicSettings,
         options?: {
             confirmation_url?: string;
             email_subscription?: boolean;
@@ -647,7 +665,7 @@ export default class Skapi {
 
     @formHandler()
     createAccount(
-        form: UserAttributes & UserProfilePublicSettings & { email: string; password: string; },
+        form: { email: string; password: string; } & UserAttributes & UserProfilePublicSettings
     ): Promise<UserProfile & PublicUser & { email_admin: string; approved: string; log: number; username: string; }> {
         return createAccount.bind(this)(form);
     }
@@ -787,13 +805,10 @@ export default class Skapi {
         number_of_records: string; // Number records tagged
     }>> { return getTags.bind(this)(query, fetchOptions); }
     @formHandler()
-    deleteRecords(params: DelRecordQuery & { private_key?: string; }): Promise<string> { return deleteRecords.bind(this)(params); }
+    deleteRecords(params: DelRecordQuery): Promise<string | DatabaseResponse<string>> { return deleteRecords.bind(this)(params); }
     @formHandler()
-    resendSignupConfirmation(
-        /** Redirect url on confirmation success. */
-        redirect: string
-    ): Promise<'SUCCESS: Signup confirmation E-Mail has been sent.'> {
-        return resendSignupConfirmation.bind(this)(redirect);
+    resendSignupConfirmation(): Promise<'SUCCESS: Signup confirmation E-Mail has been sent.'> {
+        return resendSignupConfirmation.bind(this)();
     }
     @formHandler()
     recoverAccount(
@@ -806,9 +821,9 @@ export default class Skapi {
     getUsers(
         params?: {
             /** Index name to search. */
-            searchFor: 'user_id' | 'email' | 'phone_number' | 'locale' | 'name' | 'address' | 'gender' | 'birthdate' | 'subscribers' | 'timestamp';
+            searchFor: 'user_id' | 'email' | 'phone_number' | 'locale' | 'name' | 'address' | 'gender' | 'birthdate' | 'subscribers' | 'timestamp' | 'approved';
             /** Index value to search. */
-            value: string | number | boolean;
+            value: string | number | boolean | string[];
             /** Search condition. */
             condition?: '>' | '>=' | '=' | '<' | '<=' | '!=' | 'gt' | 'gte' | 'eq' | 'lt' | 'lte' | 'ne';
             /** Range of search. */
@@ -891,7 +906,7 @@ export default class Skapi {
         user_id: string | string[];
     }): Promise<DatabaseResponse<{ record_id: string; user_id: string; }>> { return listPrivateRecordAccess.bind(this)(params); }
     @formHandler()
-    requestPrivateRecordAccessKey(params: { record_id: string | string[] }): Promise<{ [record_id: string]: string }> {
+    requestPrivateRecordAccessKey(params: { record_id: string; reference_id?: string; }): Promise<string> {
         return requestPrivateRecordAccessKey.bind(this)(params);
     }
     @formHandler()
@@ -933,7 +948,7 @@ export default class Skapi {
 
     @formHandler({ preventMultipleCalls: true })
     signup(
-        form: Form<UserAttributes & { email: String, password: String; username?: string; }>,
+        form: Form<{ email: String, password: String; username?: string; } & UserAttributes>,
         option?: {
             /**
              * When true, the service will send out confirmation E-Mail.
@@ -952,7 +967,7 @@ export default class Skapi {
              * Automatically login to account after signup. Will not work if signup confirmation is required.
              */
             login?: boolean;
-        } & { progress?: ProgressCallback }): Promise<UserProfile | "SUCCESS: The account has been created. User's signup confirmation is required." | 'SUCCESS: The account has been created.'> {
+        }): Promise<UserProfile | "SUCCESS: The account has been created. User's signup confirmation is required." | 'SUCCESS: The account has been created.'> {
         return signup.bind(this)(form, option);
     }
 
@@ -993,7 +1008,7 @@ export default class Skapi {
     @formHandler()
     postRecord(
         form: Form<Record<string, any>> | null | undefined,
-        config: PostRecordConfig & { progress?: ProgressCallback }
+        config: PostRecordConfig
     ): Promise<RecordData> { return postRecord.bind(this)(form, config); }
     @formHandler()
     getSubscriptions(
@@ -1001,7 +1016,10 @@ export default class Skapi {
             /** Subscribers user id. */
             subscriber?: string;
             /** User ID of the subscription. User id that subscriber has subscribed to. */
-            subscription?: string;
+            subscription?: {
+                user_id: string;
+                group?: number | number[];
+            };
             /** Fetch blocked subscription when True */
             blocked?: boolean;
         },
@@ -1012,30 +1030,33 @@ export default class Skapi {
         group: number; // Subscription group number
         timestamp: number; // Subscribed UNIX timestamp
         blocked: boolean; // True when subscriber is blocked by subscription
+        get_feed: boolean; // True when subscriber gets feed
+        get_notified: boolean; // True when subscriber gets notified
+        get_email: boolean; // True when subscriber gets email
     }>> {
         return getSubscriptions.bind(this)(params, fetchOptions);
     }
     @formHandler()
-    subscribe(params: { user_id: string }): Promise<'SUCCESS: the user has subscribed.'> {
+    subscribe(params: { user_id: string; group: number | number[]; get_feed?: boolean; get_notified?: boolean; get_email?: boolean; }): Promise<'SUCCESS: the user has subscribed.'> {
         return subscribe.bind(this)(params);
     }
     @formHandler()
-    unsubscribe(params: { user_id: string }): Promise<'SUCCESS: the user has unsubscribed.'> {
+    unsubscribe(params: { user_id: string; group: number | number[]; }): Promise<'SUCCESS: the user has unsubscribed.'> {
         return unsubscribe.bind(this)(params);
     }
     @formHandler()
-    blockSubscriber(params: { user_id: string }): Promise<'SUCCESS: blocked user id "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx".'> {
+    blockSubscriber(params: { user_id: string; group: number | number[]; }): Promise<'SUCCESS: blocked user id "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx".'> {
         return blockSubscriber.bind(this)(params);
     }
     @formHandler()
-    unblockSubscriber(params: { user_id: string }): Promise<'SUCCESS: unblocked user id "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx".'> {
+    unblockSubscriber(params: { user_id: string; group: number | number[]; }): Promise<'SUCCESS: unblocked user id "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx".'> {
         return unblockSubscriber.bind(this)(params);
     }
     @formHandler()
     subscribeNewsletter(
         params: Form<{
             email?: string;
-            group: number | 'public' | 'authorized';
+            group: number | 'public' | 'authorized' | 'admin';
             redirect?: string;
         }>
     ): Promise<string> {
