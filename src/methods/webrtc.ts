@@ -1,5 +1,5 @@
 import { SkapiError } from "../Main";
-import { RTCResolved, RTCCallback, RTCConnectorParams, RTCReceiverParams, WebSocketMessage, RTCConnector } from "../Types";
+import { RTCResolved, RTCEvent, RTCConnectorParams, RTCReceiverParams, WebSocketMessage, RTCConnector } from "../Types";
 import { extractFormData } from "../utils/utils";
 import validator from "../utils/validator";
 
@@ -7,7 +7,7 @@ export const __peerConnection: { [sender: string]: RTCPeerConnection } = {};
 export const __dataChannel: { [sender: string]: { [label: string]: RTCDataChannel } } = {};
 export const __caller_ringing: { [recipient: string]: (v: any) => void } = {};
 export const __receiver_ringing: { [caller: string]: string } = {};
-export const __rtcCallbacks: { [sender: string]: (v: any) => void } = {};
+export const __rtcEvents: { [sender: string]: (v: any) => void } = {};
 
 let __rtcCandidatesBuffer: { [sender: string]: any[] } = {};
 let __rtcSdpOfferBuffer: { [sender: string]: any[] } = {};
@@ -88,7 +88,7 @@ export async function receiveIceCandidate(candidate: any, recipient: string) {
 export async function closeRTC(params: { cid?: string; close_all?: boolean }): Promise<void> {
     validator.Params(params, {
         cid: v => {
-            if (v && typeof v !== 'string') {
+            if (typeof v !== 'string') {
                 throw new SkapiError(`"cid" should be type: <string>.`, { code: 'INVALID_PARAMETER' });
             }
             if (v && v.slice(0, 4) !== 'cid:') {
@@ -145,14 +145,14 @@ export async function closeRTC(params: { cid?: string; close_all?: boolean }): P
                 signalingState: __peerConnection[cid].signalingState
             }
 
-            if (__rtcCallbacks[cid]) {
-                __rtcCallbacks[cid](msg);
+            if (__rtcEvents[cid]) {
+                __rtcEvents[cid](msg);
             }
 
             this.log('closeRTC', msg);
         }
 
-        delete __rtcCallbacks[cid];
+        delete __rtcEvents[cid];
         delete __receiver_ringing[cid];
         delete __caller_ringing[cid];
         delete __peerConnection[cid];
@@ -166,11 +166,46 @@ export async function closeRTC(params: { cid?: string; close_all?: boolean }): P
     else {
         close(cid);
     }
+
+    this.log('Cleaning up media stream...');
+    if (this.__mediaStream) {
+        this.__mediaStream.getTracks().forEach((track) => {
+            track.stop(); // Stops the track (audio or video)
+        });
+        this.__mediaStream = null; // Clear the reference to the MediaStream
+    }
+}
+
+async function createMediaStream(media: MediaStream | MediaStreamConstraints): Promise<MediaStream> {
+    if (media instanceof MediaStream) {
+        return media;
+    }
+    
+    if (!media.video && !media.audio) {
+        // make dummy media stream
+        // Create a dummy MediaStream
+        const dummyStream = new MediaStream();
+
+        // Create a dummy video track (using a canvas)
+        const canvas = document.createElement('canvas');
+        canvas.width = 1;
+        canvas.height = 1;
+        const dummyVideoStream = canvas.captureStream();
+        const dummyVideoTrack = dummyVideoStream.getVideoTracks()[0];
+
+        // Add the dummy video track to the MediaStream
+        dummyStream.addTrack(dummyVideoTrack);
+
+        // Assign the dummy MediaStream to this.__mediaStream
+        return dummyStream;
+    }
+
+    return navigator.mediaDevices.getUserMedia(media);
 }
 
 export async function connectRTC(
     params: RTCConnectorParams,
-    callback: RTCCallback
+    callback: RTCEvent
 ): Promise<RTCConnector> {
     if (typeof callback !== 'function') {
         throw new SkapiError(`Callback is required.`, { code: 'INVALID_PARAMETER' });
@@ -181,11 +216,11 @@ export async function connectRTC(
     }
 
     params = validator.Params(params, {
-        cid: v=>{
-            if(typeof v !== 'string'){
+        cid: v => {
+            if (typeof v !== 'string') {
                 throw new SkapiError(`"cid" should be type: <string>.`, { code: 'INVALID_PARAMETER' });
             }
-            if(v.slice(0, 4) !== 'cid:') {
+            if (v && v.slice(0, 4) !== 'cid:') {
                 throw new SkapiError(`"cid" should be a valid connection id.`, { code: 'INVALID_PARAMETER' });
             }
             return v;
@@ -205,7 +240,7 @@ export async function connectRTC(
     }, ['cid']);
 
     let { cid, ice } = params;
-    
+
     if (!(params?.media instanceof MediaStream)) {
         if (params?.media?.video || params?.media?.audio) {
             // check if it is localhost or https
@@ -238,24 +273,13 @@ export async function connectRTC(
 
     // add media stream
     if (params?.media) {
-        if (params?.media instanceof MediaStream || this.__mediaStream) {
-            this.__mediaStream = this.__mediaStream || params.media;
-        }
-        else {
-            if (params?.media?.video || params?.media?.audio) {
-                this.__mediaStream = await navigator.mediaDevices.getUserMedia({
-                    video: params?.media?.video,
-                    audio: params?.media?.audio
-                });
-            }
-        }
-        if (this.__mediaStream)
-            this.__mediaStream.getTracks().forEach(track => {
-                __peerConnection[cid].addTrack(track, this.__mediaStream);
-            });
+        this.__mediaStream = await createMediaStream(params.media);
+        this.__mediaStream.getTracks().forEach(track => {
+            __peerConnection[cid].addTrack(track, this.__mediaStream);
+        });
     }
 
-    __rtcCallbacks[cid] = callback;
+    __rtcEvents[cid] = callback;
 
     if (!__dataChannel[cid]) {
         __dataChannel[cid] = {};
@@ -318,8 +342,8 @@ export async function connectRTC(
                 __peerConnection[cid].onnegotiationneeded = () => {
                     this.log('onnegotiationneeded', `sending offer to "${cid}".`);
                     sendOffer.bind(this)(cid);
-                    if (__rtcCallbacks[cid])
-                        __rtcCallbacks[cid]({
+                    if (__rtcEvents[cid])
+                        __rtcEvents[cid]({
                             type: 'negotiationneeded',
                             target: __peerConnection[cid],
                             timestamp: new Date().toISOString(),
@@ -334,14 +358,14 @@ export async function connectRTC(
                     channels: __dataChannel[cid],
                     hangup: () => closeRTC.bind(this)({ cid: cid }),
                     media: this.__mediaStream
-                })
+                });
             }).bind(this);
         })
     }
 }
 
-export function respondRTC(msg: WebSocketMessage): (params: RTCReceiverParams, callback: RTCCallback) => Promise<RTCResolved> {
-    return async (params: RTCReceiverParams, callback: RTCCallback): Promise<RTCResolved> => {
+export function respondRTC(msg: WebSocketMessage): (params: RTCReceiverParams, callback: RTCEvent) => Promise<RTCResolved> {
+    return async (params: RTCReceiverParams, callback: RTCEvent): Promise<RTCResolved> => {
         params = params || {};
         params = extractFormData(params).data;
 
@@ -376,25 +400,15 @@ export function respondRTC(msg: WebSocketMessage): (params: RTCReceiverParams, c
         }
 
         if (params?.media) {
-            if (params?.media instanceof MediaStream || this.__mediaStream) {
-                this.__mediaStream = this.__mediaStream || params.media;
-            }
-            else {
-                if (params?.media?.video || params?.media?.audio)
-                    this.__mediaStream = await navigator.mediaDevices.getUserMedia({
-                        video: params?.media?.video,
-                        audio: params?.media?.audio
-                    });
-            }
-            if (this.__mediaStream)
-                this.__mediaStream.getTracks().forEach(track => {
-                    __peerConnection[sender].addTrack(track, this.__mediaStream);
-                });
+            this.__mediaStream = await createMediaStream(params.media);
+            this.__mediaStream.getTracks().forEach(track => {
+                __peerConnection[sender].addTrack(track, this.__mediaStream);
+            });
         }
 
         delete __receiver_ringing[sender];
 
-        __rtcCallbacks[sender] = callback;
+        __rtcEvents[sender] = callback;
 
         if (!__dataChannel[sender]) {
             __dataChannel[sender] = {};
@@ -461,7 +475,7 @@ async function sendIceCandidate(event, recipient) {
         return;
     }
 
-    let callback = __rtcCallbacks[recipient] || (() => { });
+    let callback = __rtcEvents[recipient] || (() => { });
 
     // Collect ICE candidates and send them to the remote peer
     let candidate = event.candidate;
@@ -490,7 +504,7 @@ async function sendIceCandidate(event, recipient) {
 
 function peerConnectionHandler(key: string, skipKey: string[]) {
     let skip = new Set(skipKey);
-    let cb = __rtcCallbacks[key] || ((v: any) => { });
+    let cb = __rtcEvents[key] || ((v: any) => { });
     let peer = __peerConnection[key];
 
     const handlers = {
@@ -519,7 +533,7 @@ function peerConnectionHandler(key: string, skipKey: string[]) {
                     connectionState: peer.iceConnectionState
                 });
             } else {
-                cb({ type: 'icecandidateend', timestamp: new Date().toISOString() });
+                cb({ type: 'icecandidateend', target: peer, timestamp: new Date().toISOString() });
             }
         },
         onicecandidateerror: (event: any) => {
@@ -604,7 +618,7 @@ function peerConnectionHandler(key: string, skipKey: string[]) {
 
 function handleDataChannel(key: string, dataChannel: RTCDataChannel, skipKey?: string[]) {
     let skip = new Set(skipKey);
-    let cb = __rtcCallbacks[key] || ((v: any) => { });
+    let cb = __rtcEvents[key] || ((v: any) => { });
 
     const events = {
         onmessage: (event) => {

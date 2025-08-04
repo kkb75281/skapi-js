@@ -1,85 +1,131 @@
-export type Condition = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne' | '>' | '>=' | '<' | '<=' | '=' | '!=';
-
-export type RTCCallback = (e: {
-    type: string;
-    [key: string]: any;
-}) => void
+export type Condition =
+    | "gt"
+    | "gte"
+    | "lt"
+    | "lte"
+    | "eq"
+    | ">"
+    | ">="
+    | "<"
+    | "<="
+    | "=";
 
 export type RTCReceiverParams = {
     ice?: string;
-    media?: {
-        video: boolean;
-        audio: boolean;
-    } | MediaStream;
-}
+    media?:
+        | {
+              video: boolean;
+              audio: boolean;
+          }
+        | MediaStream
+        | MediaStreamConstraints;
+};
 
 export type RTCConnectorParams = {
     cid: string;
     ice?: string;
-    media?: {
-        video: boolean;
-        audio: boolean;
-    } | MediaStream;
-    channels?: Array<RTCDataChannelInit | 'text-chat' | 'file-transfer' | 'video-chat' | 'voice-chat' | 'gaming'>;
-}
+    media?:
+        | {
+              video: boolean;
+              audio: boolean;
+          }
+        | MediaStream
+        | MediaStreamConstraints;
+    channels?: Array<
+        | RTCDataChannelInit
+        | "text-chat"
+        | "file-transfer"
+        | "video-chat"
+        | "voice-chat"
+        | "gaming"
+    >;
+};
 
 export type RTCConnector = {
     hangup: () => void;
     connection: Promise<RTCResolved>;
-}
+};
 
 export type RTCResolved = {
     target: RTCPeerConnection;
     channels: {
-        [protocol: string]: RTCDataChannel
+        [protocol: string]: RTCDataChannel;
     };
     hangup: () => void;
     media: MediaStream;
-}
+};
+
+export type RTCEvent = (e: { type: string; [key: string]: any }) => void;
 
 export type WebSocketMessage = {
-    type: 'message' | 'error' | 'success' | 'close' | 'notice' | 'private' | 'rtc' | 'reconnect' | 'rtc:incoming' | 'rtc:closed';
+    type:
+        | "message"
+        | "error"
+        | "success"
+        | "close"
+        | "notice"
+        | "private"
+        | "reconnect"
+        | "rtc:incoming"
+        | "rtc:closed";
     message?: any;
-    connectRTC?: (params: RTCReceiverParams, callback: RTCCallback) => Promise<RTCResolved>;
+    connectRTC?: (
+        params: RTCReceiverParams,
+        callback: RTCEvent
+    ) => Promise<RTCResolved>;
     hangup?: () => void; // Reject incoming RTC connection.
     sender?: string; // user_id of the sender
     sender_cid?: string; // scid of the sender
     sender_rid?: string; // group of the sender
-}
+    code?: "USER_LEFT" | "USER_DISCONNECTED" | "USER_JOINED" | null; // code for notice messeges
+};
 
 export type RealtimeCallback = (rt: WebSocketMessage) => void;
+
+export type DelRecordQuery = GetRecordQuery & {
+    unique_id?: string | string[];
+    record_id?: string | string[];
+};
 
 export type GetRecordQuery = {
     unique_id?: string; // When unique_id is given, it will fetch the record with the given unique_id.
     record_id?: string; // When record_id is given, it will fetch the record with the given record_id. This overrides all other parameters.
 
     /** Table name not required when "record_id" is given. If string is given, "table.name" will be set with default settings. */
-    table?: string | {
-        /** Not allowed: Special characters. Allowed: White space. periods.*/
-        name: string;
-        /** Number range: 0 ~ 99. Default: 'public' */
-        access_group?: number | 'private' | 'public' | 'authorized' | 'admin';
-        /** User ID of subscription */
-        subscription?: string | {
-            user_id: string;
-            /** Number range: 0 ~ 99 */
-            group: number;
-        };
-    };
+    table?:
+        | string
+        | {
+              /** Not allowed: Special characters. Allowed: White space. periods.*/
+              name: string;
+              /** Number range: 0 ~ 99. Default: 'public' */
+              access_group?:
+                  | number
+                  | "private"
+                  | "public"
+                  | "authorized"
+                  | "admin";
+              /** User ID of subscription */
+              subscription?: string;
+          };
 
-    reference?: string // Referenced record ID or unique ID. If user ID is given, it will fetch records that are uploaded by the user.
+    reference?: string; // Referenced record ID or unique ID. If user ID is given, it will fetch records that are uploaded by the user.
 
     /** Index condition and range cannot be used simultaneously.*/
     index?: {
         /** Not allowed: White space, special characters. Allowed: Periods. */
-        name: string | '$updated' | '$uploaded' | '$referenced_count' | '$user_id';
+        name:
+            | string
+            | "$updated"
+            | "$uploaded"
+            | "$referenced_count"
+            | "$user_id";
         /** Not allowed: Periods, special characters. Allowed: White space. */
         value: string | number | boolean;
-        condition?: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne' | '>' | '>=' | '<' | '<=' | '=' | '!=';
+        condition?: Condition;
         range?: string | number | boolean;
     };
     tag?: string;
-}
+};
 
 export type PostRecordConfig = {
     record_id?: string; // when record_id is given, it will update the record with the given record_id. If record_id is not given, it will create a new record.
@@ -89,33 +135,49 @@ export type PostRecordConfig = {
     /** Table name not required when "record_id" is given. If string is given, "table.name" will be set with default settings. */
     table?: {
         /** Not allowed: Special characters. Allowed: White space. periods.*/
-        name?: string;
+        name: string;
         /** Number range: 0 ~ 99. Default: 'public' */
-        access_group?: number | 'private' | 'public' | 'authorized' | 'admin';
+        access_group?: number | "private" | "public" | "authorized" | "admin";
 
         /** When true, Record will be only accessible for subscribed users. */
         subscription?: {
-            group: number; // subscription group. default 1.
-            exclude_from_feed?: boolean; // When true, record will be excluded from the subscribers feed.
+            is_subscription_record: boolean; // When true, record will be treated as a subscription record.
+            upload_to_feed?: boolean; // When true, record will be uploaded to the feed of the subscribers.
             notify_subscribers?: boolean; // When true, subscribers will receive notification when the record is uploaded.
-            feedback_referencing_records?: boolean; // When true, and if this is a record in subscription table, records referencing this record will be included to the subscribers feed of the owner of the record.
+            feed_referencing_records?: boolean; // When true, records referencing this record will be included to the subscribers feed.
+            notify_referencing_records?: boolean; // When true, records referencing this record will be notified to subscribers.
         };
     };
 
     source?: {
-        allow_referencing_to_feed?: boolean; // When true, and if this is a record is referencing a record in subscription table, it will be included to the reference record owners feed.
         referencing_limit?: number; // Default: null (Infinite)
         prevent_multiple_referencing?: boolean; // If true, a single user can reference this record only once.
         can_remove_referencing_records?: boolean; // When true, owner of the record can remove any record that are referencing this record. Also when this record is deleted, all the record referencing this record will be deleted.
         only_granted_can_reference?: boolean; // When true, only the user who has granted private access to the record can reference this record.
-        referencing_index_restrictions?: {
-            /** Not allowed: White space, special characters. Allowed: Alphanumeric, Periods. */
-            name: string; // Allowed index name
-            /** Not allowed: Periods, special characters. Allowed: Alphanumeric, White space. */
-            value?: string | number | boolean; // Allowed index value
-            range?: string | number | boolean; // Allowed index range
-            condition?: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne' | '>' | '>=' | '<' | '<=' | '=' | '!='; // Allowed index value condition
-        }[]
+        /** Index restrictions for referencing records. null removes all restrictions. */
+        referencing_index_restrictions?:
+            | {
+                  /** Not allowed: White space, special characters. Allowed: Alphanumeric, Periods. */
+                  name: string; // Allowed index name
+                  /** Not allowed: Periods, special characters. Allowed: Alphanumeric, White space. */
+                  value?: string | number | boolean; // Allowed index value
+                  range?: string | number | boolean; // Allowed index range
+                  condition?:
+                      | "gt"
+                      | "gte"
+                      | "lt"
+                      | "lte"
+                      | "eq"
+                      | "ne"
+                      | ">"
+                      | ">="
+                      | "<"
+                      | "<="
+                      | "="
+                      | "!="; // Allowed index value condition
+              }[]
+            | null;
+        allow_granted_to_grant_others?: boolean; // When true, the user who has granted private access to the record can grant access to other users.
     };
 
     /** Can be record ID or unique ID */
@@ -132,22 +194,20 @@ export type PostRecordConfig = {
     tags?: string[] | null; // null removes all tags
     remove_bin?: BinaryFile[] | string[] | null; // Removes bin data from the record. When null, it will remove all bin data.
     progress?: ProgressCallback; // Callback for database request progress. Useful when building progress bar.
-}
-
-export type DelRecordQuery = {
-    unique_id?: string | string[];
-    record_id?: string | string[];
-} & GetRecordQuery;
+};
 
 export type BinaryFile = {
-    access_group: number | 'private' | 'public' | 'authorized';
+    access_group: number | "private" | "public" | "authorized";
     filename: string;
     url: string;
     path: string;
     size: number;
     uploaded: number;
-    getFile: (dataType?: 'base64' | 'endpoint' | 'blob', progress?: ProgressCallback) => Promise<Blob | string | void>;
-}
+    getFile: (
+        dataType?: "base64" | "endpoint" | "blob",
+        progress?: ProgressCallback
+    ) => Promise<Blob | string | void>;
+};
 
 export type RecordData = {
     record_id: string;
@@ -160,28 +220,39 @@ export type RecordData = {
     table: {
         name: string;
         /** Number range: 0 ~ 99 */
-        access_group: number | 'private' | 'public' | 'authorized' | 'admin';
+        access_group: number | "private" | "public" | "authorized" | "admin";
         /** User ID of subscription */
         subscription?: {
-            user_id: string;
-            /** Number range: 0 ~ 99 */
-            group: number;
+            is_subscription_record: boolean;
+            upload_to_feed: boolean; // When true, record will be uploaded to the feed of the subscribers.
+            notify_subscribers: boolean; // When true, subscribers will receive notification when the record is uploaded.
+            feed_referencing_records: boolean; // When true, records referencing this record will be included to the subscribers feed.
+            notify_referencing_records: boolean; // When true, records referencing this record will be notified to subscribers.
         };
     };
     source: {
         referencing_limit: number; // Default: null (Infinite)
         prevent_multiple_referencing: boolean; // If true, a single user can reference this record only once.
         can_remove_referencing_records: boolean; // When true, owner of the record can remove any record that are referencing this record. Also when this record is deleted, all the record referencing this record will be deleted.
-        exclude_referencing_from_subscription_feed: boolean; // If this record requires subscription and if this option is set to true, referencing records will be excluded from the subscription feed.
         only_granted_can_reference: boolean; // When true, only the user who has granted private access to the record can reference this record.
         referencing_index_restrictions?: {
-            /** Not allowed: White space, special characters. Allowed: Alphanumeric, Periods. */
             name: string; // Allowed index name
-            /** Not allowed: Periods, special characters. Allowed: Alphanumeric, White space. */
             value?: string | number | boolean; // Allowed index value
             range?: string | number | boolean; // Allowed index range
-            condition?: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne' | '>' | '>=' | '<' | '<=' | '=' | '!='; // Allowed index value condition
-        }[]
+            condition?:
+                | "gt"
+                | "gte"
+                | "lt"
+                | "lte"
+                | "eq"
+                | "ne"
+                | ">"
+                | ">="
+                | "<"
+                | "<="
+                | "="
+                | "!="; // Allowed index value condition
+        }[];
     };
     reference?: string; // record id of the referenced record.
     index?: {
@@ -190,29 +261,18 @@ export type RecordData = {
     };
     data?: Record<string, any>;
     tags?: string[];
-    bin: { [key: string]: BinaryFile | BinaryFile[] };
+    bin: { [key: string]: BinaryFile[] };
     ip: string;
     readonly: boolean;
-}
+};
 
 export type Connection = {
     /** User's locale */
     locale: string;
-    /** Service owner's ID */
-    // owner: string;
-    /** E-Mail address of the service owner */
-    // email: string;
-    /** Service ID */
-    // service: string;
-    /** Service region */
-    // region: string;
-    /** 13 digits timestamp of the service creation */
-    // timestamp: number;
-    /** User agent info */
     user_agent: string;
     /** Connected user's IP address */
     ip: string;
-    /** Service level */
+    /** Service group */
     group: number;
     /** Service name */
     service_name: string;
@@ -221,8 +281,8 @@ export type Connection = {
         freeze_database: boolean;
         prevent_inquiry: boolean;
         prevent_signup: boolean;
-    }
-}
+    };
+};
 
 export type Form<T> = HTMLFormElement | FormData | SubmitEvent | T;
 
@@ -246,7 +306,7 @@ export type Newsletters = {
      * Url of the message html.
      */
     url: string;
-}
+};
 
 export type UserProfilePublicSettings = {
     /** User's E-Mail is public when true. E-Mail should be verified. */
@@ -259,9 +319,11 @@ export type UserProfilePublicSettings = {
     gender_public?: boolean;
     /** User's birthdate is public when true. */
     birthdate_public?: boolean;
-}
+};
 
 export type UserAttributes = {
+    user_id?: string; // User ID
+
     /** User's name */
     name?: string;
     /**
@@ -280,22 +342,24 @@ export type UserAttributes = {
      */
     phone_number?: string;
     /** User's address, only visible to others when set to public. */
-    address?: string | {
-        /**
-         * Full mailing address, formatted for display or use on a mailing label. This field MAY contain multiple lines, separated by newlines. Newlines can be represented either as a carriage return/line feed pair ("\r\n") or as a single line feed character ("\n").
-         * street_address
-         * Full street address component, which MAY include house number, street name, Post Office Box, and multi-line extended street address information. This field MAY contain multiple lines, separated by newlines. Newlines can be represented either as a carriage return/line feed pair ("\r\n") or as a single line feed character ("\n").
-        */
-        formatted: string;
-        // City or locality component.
-        locality: string;
-        // State, province, prefecture, or region component.
-        region: string;
-        // Zip code or postal code component.
-        postal_code: string;
-        // Country name component.
-        country: string;
-    };
+    address?:
+        | string
+        | {
+              /**
+               * Full mailing address, formatted for display or use on a mailing label. This field MAY contain multiple lines, separated by newlines. Newlines can be represented either as a carriage return/line feed pair ("\r\n") or as a single line feed character ("\n").
+               * street_address
+               * Full street address component, which MAY include house number, street name, Post Office Box, and multi-line extended street address information. This field MAY contain multiple lines, separated by newlines. Newlines can be represented either as a carriage return/line feed pair ("\r\n") or as a single line feed character ("\n").
+               */
+              formatted: string;
+              // City or locality component.
+              locality: string;
+              // State, province, prefecture, or region component.
+              region: string;
+              // Zip code or postal code component.
+              postal_code: string;
+              // Country name component.
+              country: string;
+          };
     /**
      * User's gender. Can be "female" and "male".
      * Other values may be used when neither of the defined values are applicable.
@@ -311,7 +375,7 @@ export type UserAttributes = {
     profile?: string;
     website?: string;
     nickname?: string;
-}
+};
 
 export type UserProfile = {
     /** Service id of the user account. */
@@ -330,7 +394,8 @@ export type UserProfile = {
     phone_number_verified?: boolean;
     /** Shows 'PASS' if the user's account signup was successful. 'MEMBER' if signup confirmation was successful. */
     signup_ticket?: string;
-} & UserAttributes & UserProfilePublicSettings;
+} & UserAttributes &
+    UserProfilePublicSettings;
 
 export type PublicUser = {
     /** Service id of the user account. */
@@ -345,18 +410,20 @@ export type PublicUser = {
     locale: string;
     /** Number of the user's subscribers. */
     subscribers?: number;
+    /** Number of subscription the user has made */
+    subscribed?: number;
     /** Number of the records the user have created. */
     records?: number;
-    /** Timestamp of user last signup time. */
+    /** Timestamp of user last login time. */
     timestamp: number;
 } & UserAttributes;
 
 export type ProgressCallback = (e: {
-    status: 'upload' | 'download';
-    progress: number;
-    loaded: number;
-    total: number;
-    currentFile?: File, // Only for uploadFiles()
+    status: "upload" | "download";
+    progress: number; // 0 ~ 100, number of percent completed.
+    loaded: number; // Number of bytes loaded.
+    total: number; // Total number of bytes to be loaded.
+    currentFile?: File; // Only for uploadFiles()
     completed?: File[]; // Only for uploadFiles()
     failed?: File[]; // Only for uploadFiles()
     abort: () => void; // Aborts current data transfer. When abort is triggered during the FileList is on trasmit, it will continue to next file.
@@ -370,81 +437,25 @@ export type FetchOptions = {
     /** Result in ascending order if true, decending when false. */
     ascending?: boolean;
     /** Start key to be used to query from the certain batch of fetch. */
-    startKey?: { [key: string]: any; };
+    startKey?: { [key: string]: any };
     /** Callback for database request progress. Useful when building progress bar. */
     progress?: ProgressCallback;
-}
+};
 
 export type DatabaseResponse<T> = {
     list: T[];
     startKey: string;
     endOfList: boolean;
     startKeyHistory: string[];
-}
-
-export type Service = {
-    /** Shows active state. 1 = active, 0 = disabled */
-    active: number;
-    /** Custom api key to use for service owners custom api. */
-    api_key: string;
-    /** Service cors for connection. */
-    cors: string[];
-    /** Service owners E-Mail. */
-    email: string;
-    /** Number of users subscribed to service E-Mail. */
-    email_subscribers: number;
-    /** Service group. 1 = free try out. 1 > paid users. */
-    group: number;
-    /** Service region */
-    region: string;
-    /** Service name. */
-    name: string;
-    /** Number of newsletter subscribers. */
-    newsletter_subscribers: number;
-    /** Service id. */
-    service: string;
-    /** E-Mail template for signup confirmation. This can be changed by trigger E-Mail. */
-    template_activation: {
-        url: string;
-        subject: string;
-    };
-    /** E-Mail template for verification code E-Mail. This can be changed by trigger E-Mail. */
-    template_verification: {
-        url: string;
-        sms: string;
-        subject: string;
-    };
-    /** E-Mail template for welcome E-Mail that user receives after signup process. This can be changed by trigger E-Mail. */
-    template_welcome: {
-        url: string;
-        subject: string;
-    };
-    /** 13 digit timestamp  */
-    timestamp: number;
-    /** Service owner can send email to the triggers to send newsletters, or change automated E-Mail templates. */
-    triggers: {
-        /** Sends service E-Mail to E-Mail subscribed service users. */
-        newsletter_signed: string;
-        /** Sends newsletters. */
-        newsletter_subscribers: string;
-        /** Sets template of signup confirmation and account enable E-Mail. */
-        template_activation: string;
-        /** Sets template of verification E-Mail. */
-        template_verification: string;
-        /** Sets template of welcome E-Mail. */
-        template_welcome: string;
-    };
-    /** Number of users in the service. */
-    users: number;
-}
+};
 
 export type FileInfo = {
     url: string;
     filename: string;
-    access_group: number | 'private' | 'public' | 'authorized';
+    access_group: number | "private" | "public" | "authorized";
     filesize: number;
     record_id: string;
     uploader: string;
     uploaded: number;
     fileKey: string;
-}
+};
