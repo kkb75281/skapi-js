@@ -1,5 +1,73 @@
 import SkapiError from "../main/error";
 
+<<<<<<< HEAD
+=======
+const BASE62_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+const BASE62 = BigInt(BASE62_ALPHABET.length);
+const MAX_FORM_DATA_SIZE = 2 * 1024 * 1024;
+const USER_ATTRIBUTE_EXCLUDES = ['aud', 'cognito:username', 'event_id', 'exp', 'iat', 'iss', 'jti', 'origin_jti', 'secret_key', 'token_use'];
+const USER_ATTRIBUTE_CONVERTS = {
+    auth_time: 'log',
+    sub: 'user_id'
+};
+const SERVICE_REGION_ALPHABET = [
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a',
+    'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'
+];
+const SERVICE_REGION_KEYS = [
+    'us31', 'us72', 'ap51', 'ap22', 'ap41', 'eu71', 'ap21', 'us32', 'us71',
+    'af51', 'ap31', 'ap43', 'ap23', 'ap42', 'ca01', 'eu01', 'eu72', 'eu51',
+    'eu73', 'eu11', 'me51', 'sa31'
+];
+
+const textEncoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
+
+function getGlobalBuffer() {
+    if (typeof globalThis !== 'undefined') {
+        return (globalThis as any).Buffer;
+    }
+    return undefined;
+}
+
+function encodeUtf8(value: string): Uint8Array {
+    if (textEncoder) {
+        return textEncoder.encode(value);
+    }
+
+    const binary = unescape(encodeURIComponent(value));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+}
+
+function toUint8Array(input: any): Uint8Array {
+    if (input instanceof Uint8Array) {
+        return input;
+    }
+    if (typeof input === 'string') {
+        return encodeUtf8(input);
+    }
+    if (typeof ArrayBuffer !== 'undefined' && input instanceof ArrayBuffer) {
+        return new Uint8Array(input);
+    }
+    if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(input)) {
+        return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+    }
+    if (Array.isArray(input)) {
+        return Uint8Array.from(input);
+    }
+
+    const BufferCtor = getGlobalBuffer();
+    if (BufferCtor) {
+        return new Uint8Array(BufferCtor.from(input));
+    }
+
+    throw new Error('No byte conversion available in this environment.');
+}
+
+>>>>>>> upstream/main
 class MD5 {
     private static readonly alphabet = '0123456789abcdef';
 
@@ -159,20 +227,32 @@ class MD5 {
 }
 
 function toBase62(num: number): string {
+<<<<<<< HEAD
     const base62Chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     if (num === 0) return base62Chars[0];
     let result = '';
     while (num > 0) {
         result = base62Chars[num % 62] + result;
+=======
+    if (num === 0) return BASE62_ALPHABET[0];
+    let result = '';
+    while (num > 0) {
+        result = BASE62_ALPHABET[num % 62] + result;
+>>>>>>> upstream/main
         num = Math.floor(num / 62);
     }
     return result;
 }
 
 function fromBase62(chars: string): number {
+<<<<<<< HEAD
     let charset = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
     return chars.split('').reverse().reduce((prev, curr, i) =>
         prev + (charset.indexOf(curr) * (62 ** i)), 0);
+=======
+    return chars.split('').reverse().reduce((prev, curr, i) =>
+        prev + (BASE62_ALPHABET.indexOf(curr) * (62 ** i)), 0);
+>>>>>>> upstream/main
 }
 
 function generateRandom(length: number = 6): string {
@@ -187,6 +267,57 @@ function generateRandom(length: number = 6): string {
     return result;
 }
 
+<<<<<<< HEAD
+=======
+function isNodeRuntime(): boolean {
+    return typeof window === 'undefined' || !!(window as any)?._runningInNodeJS;
+}
+
+function isBrowserRuntime(): boolean {
+    return !isNodeRuntime()
+        && typeof document !== 'undefined'
+        && typeof document.createElement === 'function';
+}
+
+function assertMaxFormDataSize(value: any): void {
+    let serialized: string;
+
+    try {
+        serialized = JSON.stringify(value);
+    }
+    catch (e) {
+        throw new SkapiError('Invalid data type.', { code: 'INVALID_REQUEST' });
+    }
+
+    if (new Blob([serialized]).size > MAX_FORM_DATA_SIZE) {
+        throw new SkapiError('Data should not exceed 2MB', { code: 'INVALID_REQUEST' });
+    }
+}
+
+function isDefaultTruthyInputValue(value: string): boolean {
+    return value === '' || value === 'on' || value === 'true';
+}
+
+function isDefaultFalsyInputValue(value: string): boolean {
+    return value === 'false';
+}
+
+function appendNamedElementValue(
+    data: Record<string, any>,
+    element: { name: string; value: string },
+    appendData: (data: Record<string, any>, key: string, value: any) => void
+): void {
+    if (element.name) {
+        appendData(data, element.name, element.value);
+    }
+}
+
+// Check if we're in a browser environment
+const isBrowser = isBrowserRuntime();
+const hasSubmitEvent = typeof SubmitEvent !== 'undefined';
+const hasHTMLFormElement = typeof HTMLFormElement !== 'undefined';
+
+>>>>>>> upstream/main
 function extractFormData(
     form: FormData | HTMLFormElement | SubmitEvent | { [key: string]: any } | number | string | boolean | null,
     options?: {
@@ -198,6 +329,7 @@ function extractFormData(
     let data = {};
     let files = [];
 
+<<<<<<< HEAD
     function sizeof(object: any) {
         let str: string;
         try {
@@ -209,6 +341,8 @@ function extractFormData(
         return new Blob([str]).size;
     }
 
+=======
+>>>>>>> upstream/main
     function appendData(data, key, val) {
         if (options?.ignoreEmpty && val === '') {
             return;
@@ -293,10 +427,17 @@ function extractFormData(
             }
             else if (i.type === 'checkbox' || i.type === 'radio') {
                 if (i.checked) {
+<<<<<<< HEAD
                     if (i.value === '' && i.type === 'checkbox' || i.value === 'on' || i.value === 'true') {
                         appendData(data, i.name, true);
                     }
                     else if (i.value === 'false') {
+=======
+                    if ((i.type === 'checkbox' && i.value === '') || isDefaultTruthyInputValue(i.value)) {
+                        appendData(data, i.name, true);
+                    }
+                    else if (isDefaultFalsyInputValue(i.value)) {
+>>>>>>> upstream/main
                         appendData(data, i.name, false);
                     }
                     else if (i.value) {
@@ -304,10 +445,17 @@ function extractFormData(
                     }
                 }
                 else if (i.type === 'checkbox') {
+<<<<<<< HEAD
                     if (i.value === '' || i.value === 'on' || i.value === 'true') {
                         appendData(data, i.name, false);
                     }
                     else if (i.value === 'false') {
+=======
+                    if (isDefaultTruthyInputValue(i.value)) {
+                        appendData(data, i.name, false);
+                    }
+                    else if (isDefaultFalsyInputValue(i.value)) {
+>>>>>>> upstream/main
                         appendData(data, i.name, true);
                     }
                 }
@@ -323,16 +471,26 @@ function extractFormData(
         }
     }
 
+<<<<<<< HEAD
     if (form instanceof HTMLInputElement || form instanceof HTMLSelectElement || form instanceof HTMLTextAreaElement) {
         handleInput(form as HTMLInputElement);
         if (sizeof(data) > 2 * 1024 * 1024) {
             throw new SkapiError('Data should not exceed 2MB', { code: 'INVALID_REQUEST' });
         }
+=======
+    if (isBrowser && (form instanceof HTMLInputElement || form instanceof HTMLSelectElement || form instanceof HTMLTextAreaElement)) {
+        handleInput(form as HTMLInputElement);
+        assertMaxFormDataSize(data);
+>>>>>>> upstream/main
         return { data, files };
     }
 
     else {
+<<<<<<< HEAD
         if (form instanceof FormData) {
+=======
+        if (isBrowser && form instanceof FormData) {
+>>>>>>> upstream/main
             for (let pair of form.entries()) {
                 let name = pair[0];
                 let v = pair[1];
@@ -355,6 +513,7 @@ function extractFormData(
                     appendData(data, name, v);
                 }
             }
+<<<<<<< HEAD
             if (sizeof(data) > 2 * 1024 * 1024) {
                 throw new SkapiError('Data should not exceed 2MB', { code: 'INVALID_REQUEST' });
             }
@@ -364,10 +523,20 @@ function extractFormData(
             form = form.target;
         }
         if (form instanceof HTMLFormElement) {
+=======
+            assertMaxFormDataSize(data);
+            return { data, files };
+        }
+        if (isBrowser && hasSubmitEvent && form instanceof SubmitEvent) {
+            form = form.target;
+        }
+        if (isBrowser && hasHTMLFormElement && form instanceof HTMLFormElement) {
+>>>>>>> upstream/main
             let inputs = form.querySelectorAll('input');
             let selects = form.querySelectorAll('select');
             let textarea = form.querySelectorAll('textarea');
             for (let idx = 0; idx < selects.length; idx++) {
+<<<<<<< HEAD
                 let i = selects[idx];
                 if (i.name) {
                     appendData(data, i.name, i.value);
@@ -378,33 +547,52 @@ function extractFormData(
                 if (i.name) {
                     appendData(data, i.name, i.value);
                 }
+=======
+                appendNamedElementValue(data, selects[idx], appendData);
+            }
+            for (let idx = 0; idx < textarea.length; idx++) {
+                appendNamedElementValue(data, textarea[idx], appendData);
+>>>>>>> upstream/main
             }
             for (let idx = 0; idx < inputs.length; idx++) {
                 handleInput(inputs[idx]);
             }
 
+<<<<<<< HEAD
             if (sizeof(data) > 2 * 1024 * 1024) {
                 throw new SkapiError('Data should not exceed 2MB', { code: 'INVALID_REQUEST' });
             }
+=======
+            assertMaxFormDataSize(data);
+>>>>>>> upstream/main
             return { data, files };
         }
     }
 
+<<<<<<< HEAD
     if (sizeof(form) > 2 * 1024 * 1024) {
         throw new SkapiError('Data should not exceed 2MB', { code: 'INVALID_REQUEST' });
     }
+=======
+    assertMaxFormDataSize(form);
+>>>>>>> upstream/main
 
     return { data: form, files };
 }
 
 function parseUserAttributes(attr: { [key: string]: any }) {
+<<<<<<< HEAD
 
     let user: any = {};
 
+=======
+    let user: any = {};
+>>>>>>> upstream/main
     // parse attribute structure: [ { Name, Value }, ... ]
     for (let name in attr) {
         let value = attr[name];
 
+<<<<<<< HEAD
         let excludes = ['aud', 'cognito:username', 'event_id', 'exp', 'iat', 'iss', 'jti', 'origin_jti', 'secret_key', 'token_use'];
         let converts = {
             auth_time: 'log',
@@ -415,6 +603,12 @@ function parseUserAttributes(attr: { [key: string]: any }) {
 
         if (converts[name]) {
             user[converts[name]] = value;
+=======
+        if (USER_ATTRIBUTE_EXCLUDES.includes(name)) continue;
+
+        if (USER_ATTRIBUTE_CONVERTS[name]) {
+            user[USER_ATTRIBUTE_CONVERTS[name]] = value;
+>>>>>>> upstream/main
         }
 
         else if (name.includes('custom:')) {
@@ -475,6 +669,7 @@ function parseUserAttributes(attr: { [key: string]: any }) {
     return user;
 }
 
+<<<<<<< HEAD
 export {
     fromBase62,
     toBase62,
@@ -482,4 +677,236 @@ export {
     MD5,
     generateRandom,
     parseUserAttributes
+=======
+function decodeServiceId(service) {
+    service = decompressCompoundId(service); // validate format and throw if invalid
+    if (service.split("-").length === 7) {
+        const idSplit = service.split("-");
+        let region;
+        let owner;
+
+        try {
+            region = SERVICE_REGION_KEYS[fromBase62(idSplit[1][0])];
+            owner = idSplit.slice(2).join("-");
+        }
+        catch (err) {
+            throw new Error('INVALID_PARAMETER: Service ID is invalid.');
+        }
+
+        if (!region) {
+            throw new Error('INVALID_PARAMETER: Service ID is invalid.');
+        }
+
+        return { service: region + idSplit[0] + idSplit[1].slice(1), owner };
+    }
+
+    return { service, owner: "" };
+}
+
+function formatServiceId(serviceId, ownerId) {
+    // format service ID
+    const regionIndex = SERVICE_REGION_KEYS.indexOf(serviceId.slice(0, 4));
+    const regionChar = SERVICE_REGION_ALPHABET[regionIndex];
+    const subRegionId = serviceId.slice(4, -4);
+
+    let formattedServiceId = `${subRegionId}-${regionChar}${serviceId.slice(-4)}-${ownerId}`;
+    return compressCompoundId(formattedServiceId);
+}
+
+function b62ToBigInt(str) {
+    let value = 0n;
+
+    for (const ch of str) {
+        const idx = BASE62_ALPHABET.indexOf(ch);
+        if (idx < 0) {
+            throw new Error(`INVALID_PARAMETER: Invalid base62 character: ${ch}`);
+        }
+        value = value * BASE62 + BigInt(idx);
+    }
+
+    return value;
+}
+
+function bigIntToB62(value, minLength = 1) {
+    if (value < 0n) {
+        throw new Error('INVALID_PARAMETER: Negative values are not supported.');
+    }
+
+    if (value === 0n) {
+        return '0'.repeat(Math.max(1, minLength));
+    }
+
+    let output = '';
+    let current = value;
+
+    while (current > 0n) {
+        const remainder = Number(current % BASE62);
+        output = BASE62_ALPHABET[remainder] + output;
+        current /= BASE62;
+    }
+
+    if (output.length < minLength) {
+        output = '0'.repeat(minLength - output.length) + output;
+    }
+
+    return output;
+}
+
+function bigIntToBytes(value) {
+    if (value === 0n) {
+        return Uint8Array.from([0]);
+    }
+
+    const bytes = [];
+    let current = value;
+
+    while (current > 0n) {
+        bytes.push(Number(current & 0xffn));
+        current >>= 8n;
+    }
+
+    bytes.reverse();
+    return Uint8Array.from(bytes);
+}
+
+function bytesToBigInt(buf) {
+    let value = 0n;
+
+    for (const b of buf) {
+        value = (value << 8n) + BigInt(b);
+    }
+
+    return value;
+}
+
+function uuidToBytes(uuid) {
+    const hex = String(uuid).replace(/-/g, '');
+
+    if (!/^[0-9a-fA-F]{32}$/.test(hex)) {
+        throw new Error('INVALID_PARAMETER: Invalid UUID format.');
+    }
+
+    const bytes = new Uint8Array(16);
+    for (let i = 0; i < 16; i++) {
+        bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    }
+
+    return bytes;
+}
+
+function bytesToUuid(buf16) {
+    const hex = Array.from(toUint8Array(buf16), b => b.toString(16).padStart(2, '0')).join('');
+    return [
+        hex.slice(0, 8),
+        hex.slice(8, 12),
+        hex.slice(12, 16),
+        hex.slice(16, 20),
+        hex.slice(20)
+    ].join('-');
+}
+
+
+function compressCompoundId(input) {
+    const inputString = String(input);
+
+    if (inputString.split('-').length === 2) {
+        return inputString;
+    }
+
+    const match = inputString.match(/^([0-9A-Za-z]+)-([0-9A-Za-z]+)-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/);
+
+    if (!match) {
+        throw new Error('INVALID_PARAMETER: Input must match <base62>-<base62>-<uuid>.');
+    }
+
+    const [, firstPart, secondPart, uuid] = match;
+
+    if (firstPart.length < 2) {
+        throw new Error('INVALID_PARAMETER: The first part must contain at least 2 characters.');
+    }
+
+    if (secondPart.length >= BASE62_ALPHABET.length) {
+        throw new Error('INVALID_PARAMETER: The middle section is too long to encode.');
+    }
+
+    const movedPrefix = firstPart.slice(0, 2);
+    const movedFirstPart = firstPart.slice(2);
+    const movedMiddlePart = secondPart + movedPrefix;
+
+    // Part1 token format: [secondPartLength(base62:1char)][movedFirstPart][movedMiddlePart]
+    const part1 = BASE62_ALPHABET[secondPart.length] + movedFirstPart + movedMiddlePart;
+
+    const uuidBytes = uuidToBytes(uuid);
+    const part2 = bigIntToB62(bytesToBigInt(uuidBytes));
+
+    return `${part1}-${part2}`;
+}
+
+function decompressCompoundId(token) {
+    const tokenString = String(token);
+
+    if (tokenString.split('-').length !== 2) {
+        return tokenString;
+    }
+
+    const split = tokenString.split('-');
+
+    if (split.length !== 2 || !split[0] || !split[1]) {
+        throw new Error('INVALID_PARAMETER: Corrupt compressed token.');
+    }
+
+    const [part1, part2] = split;
+    const secondLength = BASE62_ALPHABET.indexOf(part1[0]);
+
+    if (secondLength < 0) {
+        throw new Error('INVALID_PARAMETER: Corrupt compressed token.');
+    }
+
+    const compacted = part1.slice(1);
+    const movedMiddleLength = secondLength + 2;
+
+    if (compacted.length < movedMiddleLength) {
+        throw new Error('INVALID_PARAMETER: Corrupt compressed token.');
+    }
+
+    const movedFirstPart = compacted.slice(0, compacted.length - movedMiddleLength);
+    const movedMiddlePart = compacted.slice(compacted.length - movedMiddleLength);
+
+    const movedPrefix = movedMiddlePart.slice(secondLength);
+    const secondPart = movedMiddlePart.slice(0, secondLength);
+    const firstPart = movedPrefix + movedFirstPart;
+
+    if (!/^[0-9A-Za-z]+$/.test(firstPart) || !/^[0-9A-Za-z]+$/.test(secondPart)) {
+        throw new Error('INVALID_PARAMETER: Corrupt compressed token.');
+    }
+
+    const uuidValue = b62ToBigInt(part2);
+    const uuidRaw = bigIntToBytes(uuidValue);
+
+    if (uuidRaw.length > 16) {
+        throw new Error('INVALID_PARAMETER: Corrupt compressed token.');
+    }
+
+    const uuidBytes = new Uint8Array(16);
+    uuidBytes.set(uuidRaw, 16 - uuidRaw.length);
+    const uuid = bytesToUuid(uuidBytes);
+
+    return `${firstPart}-${secondPart}-${uuid}`;
+}
+
+
+export {
+    fromBase62,
+    toBase62,
+    isNodeRuntime,
+    isBrowserRuntime,
+    extractFormData,
+    MD5,
+    generateRandom,
+    parseUserAttributes,
+    compressCompoundId,
+    decompressCompoundId,
+    formatServiceId,
+    decodeServiceId
+>>>>>>> upstream/main
 };

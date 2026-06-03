@@ -1,6 +1,135 @@
 import validator from '../utils/validator';
 import { SkapiError } from '../Main';
 
+<<<<<<< HEAD
+=======
+const MAX_TABLE_NAME_LENGTH = 128;
+const MAX_TAG_LENGTH = 64;
+const MAX_INDEX_NAME_LENGTH = 128;
+const MAX_INDEX_STRING_VALUE_LENGTH = 256;
+const SENTINEL_CHAR = '\u{10FFFF}';
+const CONTROL_OR_SENTINEL_REGEX = /[\u0000-\u001F\u007F]|\u{10FFFF}/u;
+const BLOCKED_KEY_SEGMENT_DELIMITER_REGEX = /[\/!*#]/;
+
+const DELIMITER_ENCODING_MAP: Record<string, string> = {
+    '/': '%2F',
+    '!': '%21',
+    '*': '%2A',
+    '#': '%23',
+};
+
+const DELIMITER_DECODING_MAP: Record<string, string> = {
+    '%2F': '/',
+    '%21': '!',
+    '%2A': '*',
+    '%23': '#',
+};
+
+function encodeReservedDelimiters(value: string) {
+    // Escape '%' first so literal sequences like "%2F" remain distinguishable
+    // from a real '/' after normalization.
+    const escapedPercent = value.replace(/%/g, '%25');
+    return escapedPercent.replace(/[\/!*#]/g, (char) => DELIMITER_ENCODING_MAP[char] || char);
+}
+
+export function decodeReservedDelimiters(value: string) {
+    if (typeof value !== 'string') {
+        return value as any;
+    }
+
+    // Reverse delimiter encoding first, then unescape '%25' so '%252F'
+    // round-trips back to literal '%2F' instead of '/'.
+    const delimitersDecoded = value.replace(/%(2F|21|2A|23)/gi, (match) => {
+        const key = match.toUpperCase();
+        return DELIMITER_DECODING_MAP[key] || match;
+    });
+
+    return delimitersDecoded.replace(/%25/gi, '%');
+}
+
+export function validateStringByPolicy(
+    value: any,
+    fieldName: string,
+    options: {
+        onlyAlphanumeric?: boolean;
+        allowEmpty?: boolean;
+        maxLength?: number;
+        blockKeyDelimiters?: boolean;
+        disallowLeadingDollar?: boolean;
+    } = {}
+) {
+    const {
+        allowEmpty = false,
+        maxLength,
+        blockKeyDelimiters = false,
+        disallowLeadingDollar = false,
+        onlyAlphanumeric = false
+    } = options;
+
+    if (typeof value !== 'string') {
+        throw new SkapiError(`"${fieldName}" should be type: <string>.`, { code: 'INVALID_PARAMETER' });
+    }
+
+    if (onlyAlphanumeric && /[^a-zA-Z0-9]/.test(value)) {
+        throw new SkapiError(`"${fieldName}" should only contain alphanumeric characters.`, { code: 'INVALID_PARAMETER' });
+    }
+
+    if (!allowEmpty && value.length === 0) {
+        throw new SkapiError(`"${fieldName}" is required.`, { code: 'INVALID_PARAMETER' });
+    }
+
+    if (maxLength && value.length > maxLength) {
+        throw new SkapiError(`"${fieldName}" should be <= ${maxLength} characters.`, { code: 'INVALID_PARAMETER' });
+    }
+
+    if (CONTROL_OR_SENTINEL_REGEX.test(value) || value.includes(SENTINEL_CHAR)) {
+        throw new SkapiError(`"${fieldName}" cannot include control characters or unsupported sentinel characters.`, { code: 'INVALID_PARAMETER' });
+    }
+
+    if (blockKeyDelimiters && BLOCKED_KEY_SEGMENT_DELIMITER_REGEX.test(value)) {
+        value = encodeReservedDelimiters(value);
+    }
+
+    if (disallowLeadingDollar && value.startsWith('$')) {
+        throw new SkapiError(`"${fieldName}" cannot start with "$".`, { code: 'INVALID_PARAMETER' });
+    }
+
+    return value;
+}
+
+export function validateTableName(value: any, fieldName = 'table.name') {
+    return validateStringByPolicy(value, fieldName, {
+        allowEmpty: false,
+        maxLength: MAX_TABLE_NAME_LENGTH,
+        blockKeyDelimiters: true,
+    });
+}
+
+export function validateTag(value: any, fieldName = 'tag') {
+    return validateStringByPolicy(value, fieldName, {
+        allowEmpty: false,
+        maxLength: MAX_TAG_LENGTH,
+        blockKeyDelimiters: true,
+    });
+}
+
+export function validateCustomIndexName(value: any, fieldName = 'index.name') {
+    return validateStringByPolicy(value, fieldName, {
+        allowEmpty: false,
+        maxLength: MAX_INDEX_NAME_LENGTH,
+        blockKeyDelimiters: true,
+        disallowLeadingDollar: true,
+    });
+}
+
+export function validateIndexStringValue(value: any, fieldName = 'index.value') {
+    return validateStringByPolicy(value, fieldName, {
+        allowEmpty: true,
+        maxLength: MAX_INDEX_STRING_VALUE_LENGTH,
+    });
+}
+
+>>>>>>> upstream/main
 export function recordIdOrUniqueId(query) {
     if (!query.record_id && !query.unique_id) {
         return null;
@@ -14,7 +143,14 @@ export function recordIdOrUniqueId(query) {
         outputObj.owner = query.owner;
     }
     if (query?.record_id) {
+<<<<<<< HEAD
         outputObj.record_id = validator.specialChars(query.record_id, 'record_id', false, false);
+=======
+        outputObj.record_id = validateStringByPolicy(query.record_id, 'record_id', {
+            allowEmpty: false,
+            onlyAlphanumeric: true,
+        });
+>>>>>>> upstream/main
     }
     else if (query?.unique_id) {
         outputObj.unique_id = query.unique_id;
@@ -23,6 +159,7 @@ export function recordIdOrUniqueId(query) {
     return outputObj;
 }
 
+<<<<<<< HEAD
 export function cannotBeEmptyString(v, paramName = 'parameter', allowPeriods = false, allowWhiteSpace = false) {
     if (!v) {
         throw new SkapiError(`"${paramName}" is required.`, { code: 'INVALID_PARAMETER' });
@@ -30,6 +167,8 @@ export function cannotBeEmptyString(v, paramName = 'parameter', allowPeriods = f
     return validator.specialChars(v, paramName, allowPeriods, allowWhiteSpace);
 }
 
+=======
+>>>>>>> upstream/main
 export function accessGroup(v) {
     if (v === undefined) {
         return 0;
@@ -53,6 +192,10 @@ export function accessGroup(v) {
             throw new SkapiError('"table.access_group" is invalid.', { code: 'INVALID_PARAMETER' });
         }
     }
+<<<<<<< HEAD
+=======
+
+>>>>>>> upstream/main
     else {
         throw new SkapiError('"table.access_group" should be type: <number | string>.', { code: 'INVALID_PARAMETER' });
     }
@@ -78,7 +221,11 @@ export function indexValue(v) {
     }
 
     if (typeof v === 'string') {
+<<<<<<< HEAD
         return cannotBeEmptyString(v, 'index.value', false, true)
+=======
+        return validateIndexStringValue(v, 'index.value');
+>>>>>>> upstream/main
     }
 
     throw new SkapiError(`"index.value" should be type: <number | boolean | string>.`, { code: 'INVALID_PARAMETER' });
@@ -98,11 +245,16 @@ export function indexRange(v, query) {
     }
 
     if (typeof v === 'string') {
+<<<<<<< HEAD
         return validator.specialChars(v, 'index.range', false, true);
+=======
+        return validateIndexStringValue(v, 'index.range');
+>>>>>>> upstream/main
     }
 
     return v;
 }
+<<<<<<< HEAD
 
 export function getStruct(query) {
     return {
@@ -168,3 +320,5 @@ export function getStruct(query) {
         private_key: 'string'
     }
 }
+=======
+>>>>>>> upstream/main

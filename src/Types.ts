@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 export type Condition =
     | "gt"
     | "gte"
@@ -20,10 +21,23 @@ export type RTCReceiverParams = {
         | MediaStream
         | MediaStreamConstraints;
 };
+=======
+export type Condition = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | '>' | '>=' | '<' | '<=' | '=';
+
+
+export type RTCReceiverParams = {
+    ice?: string;
+    media?: {
+        video: boolean;
+        audio: boolean;
+    } | MediaStream | MediaStreamConstraints;
+}
+>>>>>>> upstream/main
 
 export type RTCConnectorParams = {
     cid: string;
     ice?: string;
+<<<<<<< HEAD
     media?:
         | {
               video: boolean;
@@ -40,15 +54,28 @@ export type RTCConnectorParams = {
         | "gaming"
     >;
 };
+=======
+    media?: {
+        video: boolean;
+        audio: boolean;
+    } | MediaStream | MediaStreamConstraints;
+    channels?: Array<RTCDataChannelInit | 'text-chat' | 'file-transfer' | 'video-chat' | 'voice-chat' | 'gaming'>;
+}
+>>>>>>> upstream/main
 
 export type RTCConnector = {
     hangup: () => void;
     connection: Promise<RTCResolved>;
+<<<<<<< HEAD
 };
+=======
+}
+>>>>>>> upstream/main
 
 export type RTCResolved = {
     target: RTCPeerConnection;
     channels: {
+<<<<<<< HEAD
         [protocol: string]: RTCDataChannel;
     };
     hangup: () => void;
@@ -73,12 +100,34 @@ export type WebSocketMessage = {
         params: RTCReceiverParams,
         callback: RTCEvent
     ) => Promise<RTCResolved>;
+=======
+        [protocol: string]: RTCDataChannel
+    };
+    hangup: () => void;
+    media: MediaStream;
+}
+
+export type RTCEvent = {
+    type: 'track' | 'connectionstatechange' | 'close' | 'message' | 'open' | 'bufferedamountlow' | 'error' | 'icecandidate' | 'icecandidateend' | 'icegatheringstatechange' | 'negotiationneeded' | 'signalingstatechange';
+    [key: string]: any;
+}
+
+export type WebSocketMessage = {
+    type: 'message' | 'error' | 'success' | 'close' | 'notice' | 'private' | 'reconnect' | 'rtc:incoming' | 'rtc:closed';
+    message?: any;
+    connectRTC?: (params: RTCReceiverParams, callback: (e: RTCEvent) => void) => Promise<RTCResolved>;
+>>>>>>> upstream/main
     hangup?: () => void; // Reject incoming RTC connection.
     sender?: string; // user_id of the sender
     sender_cid?: string; // scid of the sender
     sender_rid?: string; // group of the sender
+<<<<<<< HEAD
     code?: "USER_LEFT" | "USER_DISCONNECTED" | "USER_JOINED" | null; // code for notice messeges
 };
+=======
+    code?: 'USER_LEFT' | 'USER_DISCONNECTED' | 'USER_JOINED' | null; // code for notice messeges
+}
+>>>>>>> upstream/main
 
 export type RealtimeCallback = (rt: WebSocketMessage) => void;
 
@@ -91,6 +140,7 @@ export type GetRecordQuery = {
     unique_id?: string; // When unique_id is given, it will fetch the record with the given unique_id.
     record_id?: string; // When record_id is given, it will fetch the record with the given record_id. This overrides all other parameters.
 
+<<<<<<< HEAD
     /** Table name not required when "record_id" is given. If string is given, "table.name" will be set with default settings. */
     table?:
         | string
@@ -120,11 +170,31 @@ export type GetRecordQuery = {
             | "$referenced_count"
             | "$user_id";
         /** Not allowed: Periods, special characters. Allowed: White space. */
+=======
+    /** Table name not required when "record_id" is given.*/
+    table?: {
+        /** Max 128 chars. Blocks: / ! * #, control chars, and sentinel 􏿿. */
+        name: string;
+        /** Number range: 0 ~ 99. Default: 'public' */
+        access_group?: number | 'private' | 'public' | 'authorized' | 'admin';
+        /** User ID of subscription */
+        subscription?: string;
+    };
+
+    reference?: string // Referenced record ID or unique ID. If user ID is given, it will fetch records that are uploaded by the user.
+
+    /** Index condition and range cannot be used simultaneously.*/
+    index?: {
+        /** Custom names: max 128 chars, cannot start with "$", blocks / ! * #, control chars, and sentinel 􏿿. Reserved names: $uploaded, $updated, $referenced_count, $user_id. */
+        name: string | '$updated' | '$uploaded' | '$referenced_count' | '$user_id';
+        /** String value max 256 chars. Allows punctuation (including / ! * #). Blocks control chars and sentinel 􏿿. */
+>>>>>>> upstream/main
         value: string | number | boolean;
         condition?: Condition;
         range?: string | number | boolean;
     };
     tag?: string;
+<<<<<<< HEAD
 };
 
 export type PostRecordConfig = {
@@ -142,11 +212,34 @@ export type PostRecordConfig = {
         /** When true, Record will be only accessible for subscribed users. */
         subscription?: {
             is_subscription_record: boolean; // When true, record will be treated as a subscription record.
+=======
+}
+
+export type PostRecordConfig = {
+    record_id?: string; // when record_id is given, it will update the record with the given record_id. If record_id is not given, it will create a new record.
+    unique_id?: string | null; // You can set unique_id to the record with the given unique_id. Null will remove unique_id from the record.
+    readonly?: boolean; // When true, record cannot be updated or deleted.
+
+    /** Table name not required when "record_id" is given.*/
+    table?: {
+        /** Max 128 chars. Blocks: / ! * #, control chars, and sentinel 􏿿. */
+        name?: string;
+        /** Number range: 0 ~ 99. Default: 'public' */
+        access_group?: number | 'private' | 'public' | 'authorized' | 'admin';
+
+        /** When true, Record will be only accessible for subscribed users. */
+        subscription?: {
+            is_subscription_record?: boolean; // When true, this record is a subscription record.
+>>>>>>> upstream/main
             upload_to_feed?: boolean; // When true, record will be uploaded to the feed of the subscribers.
             notify_subscribers?: boolean; // When true, subscribers will receive notification when the record is uploaded.
             feed_referencing_records?: boolean; // When true, records referencing this record will be included to the subscribers feed.
             notify_referencing_records?: boolean; // When true, records referencing this record will be notified to subscribers.
+<<<<<<< HEAD
         };
+=======
+        } | null; // When null, it will remove all subscription settings from the record.
+>>>>>>> upstream/main
     };
 
     source?: {
@@ -155,6 +248,7 @@ export type PostRecordConfig = {
         can_remove_referencing_records?: boolean; // When true, owner of the record can remove any record that are referencing this record. Also when this record is deleted, all the record referencing this record will be deleted.
         only_granted_can_reference?: boolean; // When true, only the user who has granted private access to the record can reference this record.
         /** Index restrictions for referencing records. null removes all restrictions. */
+<<<<<<< HEAD
         referencing_index_restrictions?:
             | {
                   /** Not allowed: White space, special characters. Allowed: Alphanumeric, Periods. */
@@ -177,10 +271,21 @@ export type PostRecordConfig = {
                       | "!="; // Allowed index value condition
               }[]
             | null;
+=======
+        referencing_index_restrictions?: {
+            /** Not allowed: White space, special characters. Allowed: Alphanumeric, Periods. */
+            name: string; // Allowed index name
+            /** Not allowed: Periods, special characters. Allowed: Alphanumeric, White space. */
+            value?: string | number | boolean; // Allowed index value
+            range?: string | number | boolean; // Allowed index range
+            condition?: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne' | '>' | '>=' | '<' | '<=' | '=' | '!='; // Allowed index value condition
+        }[] | null;
+>>>>>>> upstream/main
         allow_granted_to_grant_others?: boolean; // When true, the user who has granted private access to the record can grant access to other users.
     };
 
     /** Can be record ID or unique ID */
+<<<<<<< HEAD
     reference?: string;
 
     /** null removes index */
@@ -198,16 +303,41 @@ export type PostRecordConfig = {
 
 export type BinaryFile = {
     access_group: number | "private" | "public" | "authorized";
+=======
+    reference?: string | null; // When null, it will remove reference from the record.
+
+    /** null removes index */
+    index?: {
+        /** Max 128 chars, cannot start with "$", blocks / ! * #, control chars, and sentinel 􏿿. */
+        name: string;
+        /** String value max 256 chars. Allows punctuation (including / ! * #). Blocks control chars and sentinel 􏿿. */
+        value: string | number | boolean;
+    } | null;
+
+    tags?: string[] | null; // null removes all tags. each tag max 64 chars, blocks / ! * #, control chars, and sentinel 􏿿.
+    remove_bin?: BinaryFile[] | string[] | null; // Removes bin data from the record. When null, it will remove all bin data.
+    progress?: ProgressCallback; // Callback for database request progress. Useful when building progress bar.
+    reference_private_key?: string; // When referencing a record that has private access, you can provide the private key of the referenced record to pass the access check. This is only required when the referenced record has private access and the user does not have access to the record through subscription or granted access.
+}
+
+export type BinaryFile = {
+    access_group: number | 'private' | 'public' | 'authorized' | 'admin';
+>>>>>>> upstream/main
     filename: string;
     url: string;
     path: string;
     size: number;
     uploaded: number;
+<<<<<<< HEAD
     getFile: (
         dataType?: "base64" | "endpoint" | "blob",
         progress?: ProgressCallback
     ) => Promise<Blob | string | void>;
 };
+=======
+    getFile: (dataType?: 'base64' | 'download' | 'endpoint' | 'blob' | 'text' | 'info', progress?: ProgressCallback) => Promise<Blob | string | void | FileInfo>;
+}
+>>>>>>> upstream/main
 
 export type RecordData = {
     record_id: string;
@@ -220,10 +350,16 @@ export type RecordData = {
     table: {
         name: string;
         /** Number range: 0 ~ 99 */
+<<<<<<< HEAD
         access_group: number | "private" | "public" | "authorized" | "admin";
         /** User ID of subscription */
         subscription?: {
             is_subscription_record: boolean;
+=======
+        access_group: number | 'private' | 'public' | 'authorized' | 'admin';
+        /** User ID of subscription */
+        subscription?: {
+>>>>>>> upstream/main
             upload_to_feed: boolean; // When true, record will be uploaded to the feed of the subscribers.
             notify_subscribers: boolean; // When true, subscribers will receive notification when the record is uploaded.
             feed_referencing_records: boolean; // When true, records referencing this record will be included to the subscribers feed.
@@ -239,6 +375,7 @@ export type RecordData = {
             name: string; // Allowed index name
             value?: string | number | boolean; // Allowed index value
             range?: string | number | boolean; // Allowed index range
+<<<<<<< HEAD
             condition?:
                 | "gt"
                 | "gte"
@@ -252,6 +389,9 @@ export type RecordData = {
                 | "<="
                 | "="
                 | "!="; // Allowed index value condition
+=======
+            condition?: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne' | '>' | '>=' | '<' | '<=' | '=' | '!='; // Allowed index value condition
+>>>>>>> upstream/main
         }[];
     };
     reference?: string; // record id of the referenced record.
@@ -264,7 +404,11 @@ export type RecordData = {
     bin: { [key: string]: BinaryFile[] };
     ip: string;
     readonly: boolean;
+<<<<<<< HEAD
 };
+=======
+}
+>>>>>>> upstream/main
 
 export type Connection = {
     /** User's locale */
@@ -276,17 +420,33 @@ export type Connection = {
     group: number;
     /** Service name */
     service_name: string;
+<<<<<<< HEAD
+=======
+    /** Service description */
+    service_description: string;
+>>>>>>> upstream/main
     /** Service options */
     opt: {
         freeze_database: boolean;
         prevent_inquiry: boolean;
         prevent_signup: boolean;
+<<<<<<< HEAD
     };
 };
 
 export type Form<T> = HTMLFormElement | FormData | SubmitEvent | T;
 
 export type Newsletters = {
+=======
+        prevent_anonymous: boolean;
+    },
+    ai_agent?: string; // AI agent info.
+}
+
+export type Form<T> = HTMLFormElement | FormData | SubmitEvent | T;
+
+export type Newsletter = {
+>>>>>>> upstream/main
     /** Newsletter id */
     message_id: string;
     /** Time sent out */
@@ -306,9 +466,67 @@ export type Newsletters = {
      * Url of the message html.
      */
     url: string;
+<<<<<<< HEAD
 };
 
 export type UserProfilePublicSettings = {
+=======
+    /** Number users delivered */
+    delivered: number;
+}
+
+export type UserAttributes = {
+    /** User's name */
+    name?: string;
+    /**
+     * User's E-Mail for signin.<br>
+     * 64 character max.<br>
+     * When E-Mail is changed, E-Mail verified state will be changed to false.
+     * E-Mail is only visible to others when set to public.
+     * E-Mail should be verified to set to public.
+     * */
+    email?: string;
+    /**
+     * User's phone number. Format: "+0012341234"<br>
+     * When phone number is changed, phone number verified state will be changed to false.
+     * Phone number is only visible to others when set to public.
+     * Phone number should be verified to set to public.
+     */
+    phone_number?: string;
+    /** User's address, only visible to others when set to public. */
+    address?: string | {
+        /**
+         * Full mailing address, formatted for display or use on a mailing label. This field MAY contain multiple lines, separated by newlines. Newlines can be represented either as a carriage return/line feed pair ("\r\n") or as a single line feed character ("\n").
+         * street_address
+         * Full street address component, which MAY include house number, street name, Post Office Box, and multi-line extended street address information. This field MAY contain multiple lines, separated by newlines. Newlines can be represented either as a carriage return/line feed pair ("\r\n") or as a single line feed character ("\n").
+        */
+        formatted: string;
+        // City or locality component.
+        locality: string;
+        // State, province, prefecture, or region component.
+        region: string;
+        // Zip code or postal code component.
+        postal_code: string;
+        // Country name component.
+        country: string;
+    };
+    /**
+     * User's gender. Can be "female" and "male".
+     * Other values may be used when neither of the defined values are applicable.
+     * Only visible to others when set to public.
+     */
+    gender?: string;
+    /** User's birthdate. String format: "1969-07-16", only visible to others when set to public.*/
+    birthdate?: string;
+
+    /** Additional string value that can be used freely. This is only accessible to the owner of the account and the admins. */
+    misc?: string;
+    picture?: string;
+    profile?: string;
+    website?: string;
+    nickname?: string;
+
+>>>>>>> upstream/main
     /** User's E-Mail is public when true. E-Mail should be verified. */
     email_public?: boolean;
     /** User's phone number is public when true. Phone number should be verified. */
@@ -319,10 +537,61 @@ export type UserProfilePublicSettings = {
     gender_public?: boolean;
     /** User's birthdate is public when true. */
     birthdate_public?: boolean;
+<<<<<<< HEAD
 };
 
 export type UserAttributes = {
     user_id?: string; // User ID
+=======
+}
+
+export type UserProfile = {
+    /** Service id of the user account. */
+    service: string;
+    /** User ID of the service owner. */
+    owner: string;
+    /** Access level of the user's account. */
+    access_group: number;
+    /** User's ID. */
+    user_id: string;
+    /** Country code of where user first signed up from. */
+    locale: string;
+    /**
+    Account approval info and timestamp.
+    Comes with string with the following format: "{approver}:{approved | suspended}:{approved_timestamp}"
+    
+    {approver} is who approved the account:
+        [by_master] is when account approval is done manually from skapi admin panel,
+        [by_admin] is when approval is done by the admin account with api call within your service.
+        [by_skapi] is when account approval is automatically done.
+        Open ID logger ID will be the value if the user is logged with openIdLogin()
+        This timestamp is generated when the user confirms their signup, or recovers their disabled account.
+    
+    {approved | suspended}
+        [approved] is when the account is approved.
+        [suspended] is when the account is blocked by the admin or the master.
+    
+    {approved_timestamp} is the timestamp when the account is approved or suspended.
+
+     */
+    approved: string;
+    /** Last login timestamp(Seconds). */
+    log: number;
+    /** Shows true when user has verified their E-Mail. */
+    email_verified?: boolean;
+    /** Shows true when user has verified their phone number. */
+    phone_number_verified?: boolean;
+        /** User's E-Mail is public when true. E-Mail should be verified. */
+    email_public?: boolean;
+    /** User's phone number is public when true. Phone number should be verified. */
+    phone_number_public?: boolean;
+    /** User's address is public when true. */
+    address_public?: boolean;
+    /** User's gender is public when true. */
+    gender_public?: boolean;
+    /** User's birthdate is public when true. */
+    birthdate_public?: boolean;
+>>>>>>> upstream/main
 
     /** User's name */
     name?: string;
@@ -342,6 +611,7 @@ export type UserAttributes = {
      */
     phone_number?: string;
     /** User's address, only visible to others when set to public. */
+<<<<<<< HEAD
     address?:
         | string
         | {
@@ -360,6 +630,24 @@ export type UserAttributes = {
               // Country name component.
               country: string;
           };
+=======
+    address?: string | {
+        /**
+         * Full mailing address, formatted for display or use on a mailing label. This field MAY contain multiple lines, separated by newlines. Newlines can be represented either as a carriage return/line feed pair ("\r\n") or as a single line feed character ("\n").
+         * street_address
+         * Full street address component, which MAY include house number, street name, Post Office Box, and multi-line extended street address information. This field MAY contain multiple lines, separated by newlines. Newlines can be represented either as a carriage return/line feed pair ("\r\n") or as a single line feed character ("\n").
+        */
+        formatted: string;
+        // City or locality component.
+        locality: string;
+        // State, province, prefecture, or region component.
+        region: string;
+        // Zip code or postal code component.
+        postal_code: string;
+        // Country name component.
+        country: string;
+    };
+>>>>>>> upstream/main
     /**
      * User's gender. Can be "female" and "male".
      * Other values may be used when neither of the defined values are applicable.
@@ -377,17 +665,22 @@ export type UserAttributes = {
     nickname?: string;
 };
 
+<<<<<<< HEAD
 export type UserProfile = {
     /** Service id of the user account. */
     service: string;
     /** User ID of the service owner. */
     owner: string;
+=======
+export type UserPublic = {
+>>>>>>> upstream/main
     /** Access level of the user's account. */
     access_group: number;
     /** User's ID. */
     user_id: string;
     /** Country code of where user first signed up from. */
     locale: string;
+<<<<<<< HEAD
     /** Shows true when user has verified their E-Mail. */
     email_verified?: boolean;
     /** Shows true when user has verified their phone number. */
@@ -424,6 +717,93 @@ export type ProgressCallback = (e: {
     loaded: number; // Number of bytes loaded.
     total: number; // Total number of bytes to be loaded.
     currentFile?: File; // Only for uploadFiles()
+=======
+    /**
+    Account approval info and timestamp.
+    Comes with string with the following format: "{approver}:{approved | suspended}:{approved_timestamp}"
+    
+    {approver} is who approved the account:
+        [by_master] is when account approval is done manually from skapi admin panel,
+        [by_admin] is when approval is done by the admin account with api call within your service.
+        [by_skapi] is when account approval is automatically done.
+        Open ID logger ID will be the value if the user is logged with openIdLogin()
+        This timestamp is generated when the user confirms their signup, or recovers their disabled account.
+    
+    {approved | suspended}
+        [approved] is when the account is approved.
+        [suspended] is when the account is blocked by the admin or the master.
+    
+    {approved_timestamp} is the timestamp when the account is approved or suspended.
+
+     */
+    approved: string;
+    /** Account created timestamp(13 digit milliseconds). */
+    timestamp: number;
+    /** Last login timestamp(Seconds). */
+    log: number;
+    /** Number of the user's subscribers. */
+    subscribers: number;
+    /** Number of subscription the user has made */
+    subscribed: number;
+    /** Number of the records the user have created. */
+    records: number;
+
+    /** User's name */
+    name?: string;
+    /**
+     * User's E-Mail for signin.<br>
+     * 64 character max.<br>
+     * When E-Mail is changed, E-Mail verified state will be changed to false.
+     * E-Mail is only visible to others when set to public.
+     * E-Mail should be verified to set to public.
+     * */
+    email?: string;
+    /**
+     * User's phone number. Format: "+0012341234"<br>
+     * When phone number is changed, phone number verified state will be changed to false.
+     * Phone number is only visible to others when set to public.
+     * Phone number should be verified to set to public.
+     */
+    phone_number?: string;
+    /** User's address, only visible to others when set to public. */
+    address?: string | {
+        /**
+         * Full mailing address, formatted for display or use on a mailing label. This field MAY contain multiple lines, separated by newlines. Newlines can be represented either as a carriage return/line feed pair ("\r\n") or as a single line feed character ("\n").
+         * street_address
+         * Full street address component, which MAY include house number, street name, Post Office Box, and multi-line extended street address information. This field MAY contain multiple lines, separated by newlines. Newlines can be represented either as a carriage return/line feed pair ("\r\n") or as a single line feed character ("\n").
+        */
+        formatted: string;
+        // City or locality component.
+        locality: string;
+        // State, province, prefecture, or region component.
+        region: string;
+        // Zip code or postal code component.
+        postal_code: string;
+        // Country name component.
+        country: string;
+    };
+    /**
+     * User's gender. Can be "female" and "male".
+     * Other values may be used when neither of the defined values are applicable.
+     * Only visible to others when set to public.
+     */
+    gender?: string;
+    /** User's birthdate. String format: "1969-07-16", only visible to others when set to public.*/
+    birthdate?: string;
+
+    picture?: string;
+    profile?: string;
+    website?: string;
+    nickname?: string;
+};
+
+export type ProgressCallback = (e: {
+    status: 'upload' | 'download';
+    progress: number; // 0 ~ 100, number of percent completed.
+    loaded: number; // Number of bytes loaded.
+    total: number; // Total number of bytes to be loaded.
+    currentFile?: File, // Only for uploadFiles()
+>>>>>>> upstream/main
     completed?: File[]; // Only for uploadFiles()
     failed?: File[]; // Only for uploadFiles()
     abort: () => void; // Aborts current data transfer. When abort is triggered during the FileList is on trasmit, it will continue to next file.
@@ -437,6 +817,7 @@ export type FetchOptions = {
     /** Result in ascending order if true, decending when false. */
     ascending?: boolean;
     /** Start key to be used to query from the certain batch of fetch. */
+<<<<<<< HEAD
     startKey?: { [key: string]: any };
     /** Callback for database request progress. Useful when building progress bar. */
     progress?: ProgressCallback;
@@ -448,14 +829,90 @@ export type DatabaseResponse<T> = {
     endOfList: boolean;
     startKeyHistory: string[];
 };
+=======
+    startKey?: { [key: string]: any; };
+    /** Callback for database request progress. Useful when building progress bar. */
+    progress?: ProgressCallback;
+}
+export type PollingResult = { response_body: any; error: any; updated: number; request_body: any; status_code: number | null; expires: number | null; status: 'resolved' | 'failed' | 'pending'; }
+export type DatabaseResponse<T> = {
+    list: T[];
+    startKey: { [key: string]: any; } | 'end';
+    endOfList: boolean;
+    startKeyHistory: string[];
+}
+>>>>>>> upstream/main
 
 export type FileInfo = {
     url: string;
     filename: string;
+<<<<<<< HEAD
     access_group: number | "private" | "public" | "authorized";
+=======
+    access_group: number | 'private' | 'public' | 'authorized';
+>>>>>>> upstream/main
     filesize: number;
     record_id: string;
     uploader: string;
     uploaded: number;
     fileKey: string;
+<<<<<<< HEAD
 };
+=======
+}
+
+export type ConnectionInfo = {
+    user_ip: string;
+    user_agent: string;
+    user_location: string;
+    service_name: string;
+    service_description: string;
+    version: string;
+    ai_agent: string;
+};
+
+export type Table = {
+    table: string;
+    number_of_records: string;
+    size: number;
+    number_of_records_in_access_group_public?: number;
+    number_of_records_in_access_group_private?: number;
+    number_of_records_in_access_group_authorized?: number;
+    number_of_records_in_access_group_admin?: number;
+    [number_of_records_in_access_group_xx: string]: number | string | undefined; // for other access groups
+}
+
+export type Index = {
+    table: string;
+    index: string;
+    number_of_records: number;
+    string_count: number;
+    number_count: number;
+    boolean_count: number;
+    total_number: number;
+    total_bool: number;
+    average_number: number;
+    average_bool: number;
+}
+
+export type Tag = {
+    table: string;
+    tag: string;
+    number_of_records: number;
+}
+
+export type UniqueId = {
+    unique_id: string;
+    record_id: string;
+}
+
+export type Subscription = {
+    subscriber: string;
+    subscription: string;
+    timestamp: number;
+    blocked: boolean;
+    get_feed: boolean;
+    get_notified: boolean;
+    get_email: boolean;
+}
+>>>>>>> upstream/main

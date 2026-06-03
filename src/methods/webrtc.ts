@@ -86,6 +86,12 @@ export async function receiveIceCandidate(candidate: any, recipient: string) {
 }
 
 export async function closeRTC(params: { cid?: string; close_all?: boolean }): Promise<void> {
+<<<<<<< HEAD
+=======
+    if (typeof window === 'undefined' || (window as any)._runningInNodeJS) {
+        throw new SkapiError('WebRTC is not supported in Node.js environment.', { code: 'NOT_SUPPORTED' });
+    }
+>>>>>>> upstream/main
     validator.Params(params, {
         cid: v => {
             if (typeof v !== 'string') {
@@ -180,7 +186,11 @@ async function createMediaStream(media: MediaStream | MediaStreamConstraints): P
     if (media instanceof MediaStream) {
         return media;
     }
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> upstream/main
     if (!media.video && !media.audio) {
         // make dummy media stream
         // Create a dummy MediaStream
@@ -200,13 +210,25 @@ async function createMediaStream(media: MediaStream | MediaStreamConstraints): P
         return dummyStream;
     }
 
+<<<<<<< HEAD
     return navigator.mediaDevices.getUserMedia(media);
+=======
+    return window.navigator.mediaDevices.getUserMedia(media);
+>>>>>>> upstream/main
 }
 
 export async function connectRTC(
     params: RTCConnectorParams,
+<<<<<<< HEAD
     callback: RTCEvent
 ): Promise<RTCConnector> {
+=======
+    callback: (e: RTCEvent) => void
+): Promise<RTCConnector> {
+    if (typeof window === 'undefined' || (window as any)._runningInNodeJS) {
+        throw new SkapiError('WebRTC is not supported in Node.js environment.', { code: 'NOT_SUPPORTED' });
+    }
+>>>>>>> upstream/main
     if (typeof callback !== 'function') {
         throw new SkapiError(`Callback is required.`, { code: 'INVALID_PARAMETER' });
     }
@@ -244,7 +266,11 @@ export async function connectRTC(
     if (!(params?.media instanceof MediaStream)) {
         if (params?.media?.video || params?.media?.audio) {
             // check if it is localhost or https
+<<<<<<< HEAD
             if (location.hostname !== 'localhost' && location.protocol !== 'https:') {
+=======
+            if (window.location.hostname !== 'localhost' && window.location.protocol !== 'https:') {
+>>>>>>> upstream/main
                 throw new SkapiError(`Media stream is only supported on either localhost or https.`, { code: 'INVALID_REQUEST' });
             }
         }
@@ -364,8 +390,13 @@ export async function connectRTC(
     }
 }
 
+<<<<<<< HEAD
 export function respondRTC(msg: WebSocketMessage): (params: RTCReceiverParams, callback: RTCEvent) => Promise<RTCResolved> {
     return async (params: RTCReceiverParams, callback: RTCEvent): Promise<RTCResolved> => {
+=======
+export function respondRTC(msg: WebSocketMessage): (params: RTCReceiverParams, callback: (e: RTCEvent) => void) => Promise<RTCResolved> {
+    return async (params: RTCReceiverParams, callback: (e: RTCEvent) => void): Promise<RTCResolved> => {
+>>>>>>> upstream/main
         params = params || {};
         params = extractFormData(params).data;
 
@@ -383,7 +414,11 @@ export function respondRTC(msg: WebSocketMessage): (params: RTCReceiverParams, c
         if (!(params?.media instanceof MediaStream)) {
             if (params?.media?.video || params?.media?.audio) {
                 // check if it is localhost or https
+<<<<<<< HEAD
                 if (location.hostname !== 'localhost' && location.protocol !== 'https:') {
+=======
+                if (window.location.hostname !== 'localhost' && window.location.protocol !== 'https:') {
+>>>>>>> upstream/main
                     throw new SkapiError(`Media stream is only supported on either localhost or https.`, { code: 'INVALID_REQUEST' });
                 }
             }

@@ -1,6 +1,10 @@
 
 import SkapiError from '../main/error';
 import { extractFormData } from './utils';
+<<<<<<< HEAD
+=======
+import cocochex from "cocochex";
+>>>>>>> upstream/main
 
 function UserId(id: string, param = 'User ID') {
     // let uuid_regex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -89,8 +93,14 @@ function Email(email: string, paramName: string = 'email') {
 }
 
 function Url(url: string | string[]) {
+<<<<<<< HEAD
     const baseUrl = (() => {
         let baseUrl = location.origin || null;
+=======
+    const hasWindow = typeof window !== 'undefined';
+    const baseUrl = (() => {
+        let baseUrl = hasWindow ? window.location.origin || null : null;
+>>>>>>> upstream/main
         if (baseUrl && baseUrl.slice(-1) === '/') {
             baseUrl = baseUrl.slice(0, -1);
         }
@@ -114,7 +124,11 @@ function Url(url: string | string[]) {
                     if (baseUrl.slice(0, 5) === 'file:') {
                         throw new SkapiError(`"${c}" is an invalid url. Relative URL does not work on local file system. Use full URL string.`, { code: 'INVALID_PARAMETER' });
                     }
+<<<<<<< HEAD
                     let curr_loc = location.href.split('?')[0];
+=======
+                    let curr_loc = hasWindow ? window.location.href.split('?')[0] : '';
+>>>>>>> upstream/main
                     if (curr_loc.slice(-1) !== '/') {
                         curr_loc += '/';
                     }
@@ -149,6 +163,7 @@ function Url(url: string | string[]) {
     }
 }
 
+<<<<<<< HEAD
 function specialChars(
     string: string | string[],
     p = 'parameter',
@@ -188,25 +203,46 @@ function specialChars(
 
 function Params(
     params: any,
+=======
+function Params<T = any>(
+    params: T,
+>>>>>>> upstream/main
     struct: Record<string, any>,
     required: string[] = [],
     options?: {
         ignoreEmpty?: boolean;
         nullIfEmpty?: boolean;
+<<<<<<< HEAD
     }
 ): any {
+=======
+        precall?: (pre: { data: any, files: any }) => void
+    }
+): T {
+>>>>>>> upstream/main
     // struct = {
     //     a: 'type or value',
     //     b: ['number', 'boolean', 'string', 'array', 'function', 'custom value', () => 'default value when none match, or is missing'],
     //     c: (v: any) => { return 'value to assign'; }
     // }
+<<<<<<< HEAD
 
     let p = extractFormData(params, options).data;
+=======
+    let ext = extractFormData(params, options);
+    let p = ext.data;
+>>>>>>> upstream/main
     struct.service = 'string';
     struct.owner = 'string';
 
     let toCheck = {};
 
+<<<<<<< HEAD
+=======
+    // Extra user input fields not in schema are ignored.
+    // If a field value is already a function, it copies it directly (JSON clone would break functions).
+    // For each allowed field, it tries to deep-copy via JSON stringify/parse so later validation/mutation does not mutate the original input object.
+>>>>>>> upstream/main
     for (let s in struct) {
         if (p && typeof p === 'object' && !Array.isArray(p) && p.hasOwnProperty(s)) {
             if (typeof p[s] === 'function') {
@@ -223,6 +259,7 @@ function Params(
         }
     }
 
+<<<<<<< HEAD
     try {
         return checkParams(toCheck, struct, required);
     }
@@ -345,6 +382,20 @@ function checkParams(params: any, struct: any, required: string[] = [], _parentK
     throw `Invalid type "${typeof params}"${invalid_in} Should be: ${(['string', 'number', 'boolean', 'object', 'array'].includes(struct) ? `Type<${struct}>` : JSON.stringify(struct, null, 2))}`;
 }
 
+=======
+    if (options?.precall) {
+        options.precall({ data: toCheck, files: ext?.files || [] });
+    }
+
+    try {
+        return cocochex(toCheck, struct, required) as T;
+    }
+    catch (err: any) {
+        throw new SkapiError(err.message, { code: 'INVALID_PARAMETER' });
+    }
+}
+
+>>>>>>> upstream/main
 export default {
     UserId,
     PhoneNumber,
@@ -352,7 +403,11 @@ export default {
     Password,
     Email,
     Url,
+<<<<<<< HEAD
     specialChars,
     Params,
     checkParams
+=======
+    Params
+>>>>>>> upstream/main
 };
